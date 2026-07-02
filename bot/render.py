@@ -17,7 +17,7 @@ BACK_PATH = ROOT / "assets" / "back.png"
 CW = 200                      # ширина карты на канве
 CH = round(CW * 900 / 520)    # высота (пропорции сканов)
 MARGIN = 56
-TITLE_H = 88
+TITLE_H = 0  # заголовок в кадре убран: он дублировал подпись сообщения и резался
 LABEL_H = 40
 FPS = 24
 
@@ -94,14 +94,6 @@ def _base(spread: Spread, subtitle: str = "") -> tuple[Image.Image, list[tuple[i
     for _ in range(w * h // 9000):
         x, y = rnd.randrange(w), rnd.randrange(h)
         d.point((x, y), fill=(90 + rnd.randrange(60),) * 3)
-
-    title_font = _font("DejaVuSerif-Bold.ttf", 34)
-    tw = d.textlength(spread.title, font=title_font)
-    d.text(((w - tw) / 2, 26), spread.title, font=title_font, fill=GOLD)
-    if subtitle:
-        sub_font = _font("DejaVuSans.ttf", 18)
-        sw = d.textlength(subtitle, font=sub_font)
-        d.text(((w - sw) / 2, 66), subtitle, font=sub_font, fill=LABEL_COLOR)
 
     label_font = _font("DejaVuSans.ttf", 17)
     for slot, (x, y) in zip(spread.slots, pos):
@@ -304,17 +296,9 @@ def _daily_scene(dc: DrawnCard, date_str: str):
         t = y / h
         d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
 
-    title_font = _font("DejaVuSerif-Bold.ttf", 40)
-    tw = d.textlength("Карта дня", font=title_font)
-    d.text(((w - tw) / 2, 34), "Карта дня", font=title_font, fill=GOLD)
-    if date_str:
-        sub_font = _font("DejaVuSans.ttf", 20)
-        sw = d.textlength(date_str, font=sub_font)
-        d.text(((w - sw) / 2, 86), date_str, font=sub_font, fill=LABEL_COLOR)
-
-    card_w = 330
+    card_w = 360
     card = _card_face(dc.card.id, dc.is_reversed, width=card_w)
-    cx, cy = (w - card.width) // 2, 146
+    cx, cy = (w - card.width) // 2, 62
 
     name_font = _font("DejaVuSerif-Bold.ttf", 32)
     nw = d.textlength(dc.card.name, font=name_font)
