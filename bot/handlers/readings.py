@@ -35,14 +35,42 @@ class ClarifyFlow(StatesGroup):
 # --- каталог ---
 
 
+PROMO_CACHE_KEY = "catalog_promo:v1"
+
+
 @router.message(Command("spreads"))
 @router.message(F.text == kb.BTN_SPREADS)
 async def catalog(message: Message) -> None:
+    assert message.bot
     lines = ["🔮 <b>Расклады</b>\n"]
     for s in SPREADS.values():
-        lines.append(f"{s.emoji} <b>{s.title}</b> ({s.num_cards} карт{'ы' if s.num_cards < 5 else ''}) — {s.price} ⭐\n<i>{s.description}</i>\n")
+        lines.append(f"{s.emoji} <b>{s.title}</b> — {s.price} ⭐\n<i>{s.description}</i>\n")
     lines.append("Выбери расклад:")
-    await message.answer("\n".join(lines), reply_markup=kb.spreads_catalog())
+    caption = "\n".join(lines)[:1024]
+
+    cached = await db.cache_get(PROMO_CACHE_KEY)
+    if cached:
+        with suppress(Exception):
+            await message.answer_photo(cached, caption=caption, reply_markup=kb.spreads_catalog())
+            return
+    import tempfile
+    from pathlib import Path
+
+    from aiogram.types import FSInputFile
+
+    from bot.promo import render_catalog_promo
+
+    img = await asyncio.to_thread(render_catalog_promo)
+    path = Path(tempfile.mkstemp(suffix=".jpg", prefix="promo_")[1])
+    try:
+        await asyncio.to_thread(img.save, path, "JPEG", quality=88)
+        sent = await message.answer_photo(
+            FSInputFile(path), caption=caption, reply_markup=kb.spreads_catalog()
+        )
+        if sent.photo:
+            await db.cache_set(PROMO_CACHE_KEY, sent.photo[-1].file_id)
+    finally:
+        path.unlink(missing_ok=True)
 
 
 @router.callback_query(F.data == "menu:spreads")
@@ -221,7 +249,7 @@ async def reveal_interpretation(callback: CallbackQuery) -> None:
         return
     await callback.answer("✨ Читаю карты…")
     with suppress(Exception):
-        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.edit_reply_markup(reply_markup=kb.shared_reading_kb(callback.from_user.id))
 
     # ждём фоновую генерацию; если её нет (например, после рестарта) — делаем сами
     text = reading["interpretation"]
@@ -241,7 +269,7 @@ async def reveal_interpretation(callback: CallbackQuery) -> None:
 
     await callback.message.answer(
         md_bold_to_html(text),
-        reply_markup=kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify),
+        reply_markup=kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify, callback.from_user.id),
     )
 
 
@@ -304,5 +332,5 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
     await db.add_clarification(reading["id"], question, answer)
     await message.answer(
         md_bold_to_html(answer),
-        reply_markup=kb.clarify_kb(reading["id"], reading["clarifications_left"], config.price_clarify),
+        reply_markup=kb.clarify_kb(reading["id"], reading["clarifications_left"], config.price_clarify, message.from_user.id),
     )

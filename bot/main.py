@@ -6,9 +6,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
+from bot import runtime
 from bot.config import config
 from bot.db import db
 from bot.handlers import router
+from bot.handlers.daily import reminder_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +24,9 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(router)
 
+    me = await bot.get_me()
+    runtime.bot_username = me.username or ""
+
     await bot.set_my_commands([
         BotCommand(command="daily", description="🌞 Карта дня (бесплатно)"),
         BotCommand(command="spreads", description="🔮 Расклады"),
@@ -30,9 +35,11 @@ async def main() -> None:
         BotCommand(command="paysupport", description="💫 Поддержка по оплате"),
     ])
 
+    reminders = asyncio.create_task(reminder_loop(bot))
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        reminders.cancel()
         await db.close()
 
 

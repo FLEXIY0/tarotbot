@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -5,7 +7,18 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
+from bot import runtime
 from bot.spreads import SPREADS
+
+SHARE_TEXT = "🔮 Мне тут карты Таро разложили с настоящим ритуалом — попробуй, карта дня бесплатная"
+
+
+def _share_button(tg_id: int) -> InlineKeyboardButton:
+    link = f"https://t.me/{runtime.bot_username}?start={tg_id}"
+    return InlineKeyboardButton(
+        text="📤 Поделиться с другом",
+        url=f"https://t.me/share/url?url={quote(link)}&text={quote(SHARE_TEXT)}",
+    )
 
 BTN_DAILY = "🌞 Карта дня"
 BTN_SPREADS = "🔮 Расклады"
@@ -45,7 +58,7 @@ def reveal_kb(reading_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def clarify_kb(reading_id: int, free_left: int, price: int) -> InlineKeyboardMarkup:
+def clarify_kb(reading_id: int, free_left: int, price: int, tg_id: int) -> InlineKeyboardMarkup:
     if free_left > 0:
         text = f"🔍 Уточнить бесплатно (осталось {free_left})"
     else:
@@ -53,7 +66,13 @@ def clarify_kb(reading_id: int, free_left: int, price: int) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=text, callback_data=f"clarify:{reading_id}")],
         [InlineKeyboardButton(text="🔮 Новый расклад", callback_data="menu:spreads")],
+        [_share_button(tg_id)],
     ])
+
+
+def shared_reading_kb(tg_id: int) -> InlineKeyboardMarkup:
+    """Остаётся под гифкой после раскрытия толкования."""
+    return InlineKeyboardMarkup(inline_keyboard=[[_share_button(tg_id)]])
 
 
 def onboarding_skip(step: str) -> InlineKeyboardMarkup:
@@ -62,7 +81,19 @@ def onboarding_skip(step: str) -> InlineKeyboardMarkup:
     ])
 
 
-def daily_upsell() -> InlineKeyboardMarkup:
+def daily_upsell(remind_on: bool = False, tg_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="🔮 Разобрать свой вопрос", callback_data="menu:spreads")]]
+    if remind_on:
+        rows.append([InlineKeyboardButton(text="🔕 Отключить утренние напоминания", callback_data="remind:off")])
+    else:
+        rows.append([InlineKeyboardButton(text="🔔 Напоминать о карте дня по утрам", callback_data="remind:on")])
+    if tg_id:
+        rows.append([_share_button(tg_id)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def reminder_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔮 Разобрать свой вопрос", callback_data="menu:spreads")]
+        [InlineKeyboardButton(text="🌞 Вытянуть карту дня", callback_data="daily:go")],
+        [InlineKeyboardButton(text="🔕 Больше не напоминать", callback_data="remind:off")],
     ])

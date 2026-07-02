@@ -65,6 +65,15 @@ class Database:
         self._conn = await aiosqlite.connect(config.db_path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
+        # лёгкие миграции для существующих баз
+        for ddl in (
+            "ALTER TABLE users ADD COLUMN remind_daily INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN reminded_date TEXT",
+        ):
+            try:
+                await self._conn.execute(ddl)
+            except aiosqlite.OperationalError:
+                pass  # колонка уже есть
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -208,6 +217,21 @@ class Database:
     async def all_user_tg_ids(self) -> list[int]:
         cur = await self.conn.execute("SELECT tg_id FROM users")
         return [r[0] for r in await cur.fetchall()]
+
+    # --- утренние напоминания ---
+
+    async def users_to_remind(self, today: str) -> list[int]:
+        cur = await self.conn.execute(
+            "SELECT tg_id FROM users WHERE remind_daily = 1"
+            " AND (daily_card_date IS NULL OR daily_card_date != ?)"
+            " AND (reminded_date IS NULL OR reminded_date != ?)",
+            (today, today),
+        )
+        return [r[0] for r in await cur.fetchall()]
+
+    async def mark_reminded(self, tg_id: int, today: str) -> None:
+        await self.conn.execute("UPDATE users SET reminded_date = ? WHERE tg_id = ?", (today, tg_id))
+        await self.conn.commit()
 
     # --- media cache (file_id переиспользуется Telegram бесплатно) ---
 

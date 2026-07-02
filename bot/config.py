@@ -20,6 +20,7 @@ class Config:
 
     db_path: Path = field(default_factory=lambda: ROOT / os.getenv("DB_PATH", "data/tarotbot.db"))
     tz: str = field(default_factory=lambda: os.getenv("TZ", "Europe/Moscow"))
+    reminder_hour: int = field(default_factory=lambda: int(os.getenv("REMINDER_HOUR", "9")))
 
     # цены в Telegram Stars (XTR); меняются через env без правки кода
     price_one: int = field(default_factory=lambda: int(os.getenv("PRICE_ONE", "15")))
