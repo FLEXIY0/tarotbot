@@ -17,6 +17,7 @@ class Slot:
 class Spread:
     key: str
     title: str
+    short: str  # короткое имя для кнопок (мобильная ширина ~25 символов)
     emoji: str
     description: str
     price: int
@@ -33,6 +34,7 @@ SPREADS: dict[str, Spread] = {
         Spread(
             key="one",
             title="Одна карта",
+            short="Одна карта",
             emoji="🃏",
             description="Быстрый и ёмкий ответ на один вопрос.",
             price=config.price_one,
@@ -41,6 +43,7 @@ SPREADS: dict[str, Spread] = {
         Spread(
             key="three",
             title="Прошлое — Настоящее — Будущее",
+            short="Три карты",
             emoji="🌗",
             description="Как ситуация развивалась, где она сейчас и куда движется.",
             price=config.price_three,
@@ -53,6 +56,7 @@ SPREADS: dict[str, Spread] = {
         Spread(
             key="relationship",
             title="Отношения",
+            short="Отношения",
             emoji="💞",
             description="Вы, партнёр, что происходит между вами и совет карт.",
             price=config.price_relationship,
@@ -66,6 +70,7 @@ SPREADS: dict[str, Spread] = {
         Spread(
             key="celtic",
             title="Кельтский крест",
+            short="Кельтский крест",
             emoji="✨",
             description="Глубокий разбор ситуации по 10 позициям — классика Таро.",
             price=config.price_celtic,

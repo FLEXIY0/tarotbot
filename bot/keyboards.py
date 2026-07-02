@@ -28,7 +28,7 @@ def _share_button(query: str) -> InlineKeyboardButton:
 
 def spreads_catalog() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"{s.emoji} {s.title} · {s.price} ✦", callback_data=f"spread:{s.key}")]
+        [InlineKeyboardButton(text=f"{s.emoji} {s.short} · {s.price} ✦", callback_data=f"spread:{s.key}")]
         for s in SPREADS.values()
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -54,9 +54,9 @@ def shared_reading_kb(reading_id: int) -> InlineKeyboardMarkup:
 
 def clarify_kb(reading_id: int, free_left: int, price: int) -> InlineKeyboardMarkup:
     if free_left > 0:
-        text = f"🔍 Уточнить · бесплатно (осталось {free_left})"
+        text = f"🔍 Уточнить ({free_left} бесплатно)"
     else:
-        text = f"🔍 Уточнить · {price} ✦"
+        text = f"🔍 Уточнить · {price} ✦"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=text, callback_data=f"clarify:{reading_id}")],
         [InlineKeyboardButton(text="🔮 Новый расклад", callback_data="menu:spreads")],
@@ -73,9 +73,9 @@ def onboarding_skip(step: str) -> InlineKeyboardMarkup:
 def daily_upsell(remind_on: bool = False, share_query: str | None = None) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="🔮 Разобрать свой вопрос", callback_data="menu:spreads")]]
     if remind_on:
-        rows.append([InlineKeyboardButton(text="🔕 Отключить утренние напоминания", callback_data="remind:off")])
+        rows.append([InlineKeyboardButton(text="🔕 Отключить напоминания", callback_data="remind:off")])
     else:
-        rows.append([InlineKeyboardButton(text="🔔 Напоминать по утрам", callback_data="remind:on")])
+        rows.append([InlineKeyboardButton(text="🔔 Карта дня по утрам", callback_data="remind:on")])
     if share_query:
         rows.append([_share_button(share_query)])
     return InlineKeyboardMarkup(inline_keyboard=rows)

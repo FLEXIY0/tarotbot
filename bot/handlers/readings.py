@@ -44,7 +44,7 @@ async def catalog(message: Message) -> None:
     assert message.bot
     lines = ["<b>Расклады</b>\n"]
     for s in SPREADS.values():
-        lines.append(f"<b>{s.title}</b> — {s.price} ⭐\n<i>{s.description}</i>\n")
+        lines.append(f"<b>{s.title}</b> · {s.price} ✦\n<i>{s.description}</i>\n")
     caption = "\n".join(lines)[:1024]
 
     cached = await db.cache_get(PROMO_CACHE_KEY)
@@ -90,7 +90,7 @@ async def pick_spread(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(ReadingFlow.question)
     await state.update_data(spread_key=spread.key)
     await callback.message.answer(
-        f"<b>{spread.title}</b> — {spread.price} ⭐\n\n"
+        f"{spread.emoji} <b>{spread.title}</b> · {spread.price} ✦\n\n"
         "Напиши свой вопрос одним сообщением. Чем конкретнее вопрос, тем точнее ответ.",
         reply_markup=kb.skip_question(),
     )
@@ -207,6 +207,8 @@ async def deliver_reading(
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
 
+    with suppress(Exception):
+        await message.bot.send_chat_action(message.chat.id, "upload_video")
     subtitle = f"Вопрос: {question[:60]}…" if question and len(question) > 60 else (f"Вопрос: {question}" if question else "")
     caption = reading_caption(drawn, spread, question)
     try:
@@ -270,6 +272,8 @@ async def _do_reveal(callback: CallbackQuery, reading_id: int) -> None:
     await callback.answer("✨ Читаю карты…")
     with suppress(Exception):
         await callback.message.edit_reply_markup(reply_markup=kb.shared_reading_kb(reading_id))
+    with suppress(Exception):
+        await callback.message.bot.send_chat_action(callback.message.chat.id, "typing")
 
     # ждём фоновую генерацию; если её нет (например, после рестарта) — делаем сами
     text = reading["interpretation"]
@@ -342,6 +346,8 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
     prior = await db.get_clarifications(reading["id"])
     question = message.text.strip()[:500]
     await message.answer("🔮 Вглядываюсь в карты…")
+    with suppress(Exception):
+        await message.bot.send_chat_action(message.chat.id, "typing")
     answer = await interpreter.clarify(
         drawn, spread, reading["question"], reading["interpretation"] or "",
         prior, question, user.get("name"),

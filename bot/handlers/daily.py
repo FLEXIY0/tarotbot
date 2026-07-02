@@ -55,6 +55,8 @@ async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
     dc = draw(1)[0]
     orientation = "r" if dc.is_reversed else "u"
     status = await bot.send_message(chat_id, "🎴 Тасую колоду и тяну твою карту дня…")
+    with suppress(Exception):
+        await bot.send_chat_action(chat_id, "upload_video")
     date_str = datetime.now(ZoneInfo(config.tz)).strftime("%d.%m.%Y")
     anim_key = f"dailyanim:{dc.card.id}:{orientation}"
 
