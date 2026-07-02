@@ -186,10 +186,24 @@ def iter_frames(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> I
         for _ in range(times):
             yield img
 
+    def fade_scale(sprite: Image.Image, t: float) -> Image.Image:
+        """Появление: карта опускается на стол, вырастая из 55% и проявляясь."""
+        f = 0.55 + 0.45 * t
+        s = sprite.resize((max(2, round(sprite.width * f)), max(2, round(sprite.height * f))), Image.BILINEAR)
+        alpha = s.getchannel("A").point(lambda a: round(a * min(1.0, t * 1.4)))
+        s.putalpha(alpha)
+        return s
+
     yield frame()
-    # раздача рубашек
-    deal_hold = 3 if n > 4 else 5
+    # раздача: каждая рубашка прилетает с масштабированием и растворением
+    deal_steps = 6
+    deal_hold = 2 if n > 4 else 4
     for i in range(n):
+        for step in range(1, deal_steps + 1):
+            t = _smoothstep(step / deal_steps)
+            sprite = fade_scale(back, t)
+            lift = round((1 - t) * 34)
+            yield frame(anim_idx=i, anim_sprite=sprite, lift=lift)
         state[i] = "back"
         yield from repeat(frame(), deal_hold)
     # перевороты: smoothstep-изинг, карта приподнимается на пике

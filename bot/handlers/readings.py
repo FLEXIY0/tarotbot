@@ -78,21 +78,29 @@ async def cancel_question(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(ReadingFlow.question, F.data == "q:skip")
 async def skip_question(callback: CallbackQuery, state: FSMContext) -> None:
-    assert isinstance(callback.message, Message)
+    assert isinstance(callback.message, Message) and callback.from_user
     await callback.answer()
-    await send_invoice_for_reading(callback.message, state, question=None)
+    await send_invoice_for_reading(callback.message, state, question=None, tg_id=callback.from_user.id)
 
 
 @router.message(ReadingFlow.question, F.text)
 async def got_question(message: Message, state: FSMContext) -> None:
-    assert message.text
-    await send_invoice_for_reading(message, state, question=message.text.strip()[:500])
+    assert message.text and message.from_user
+    await send_invoice_for_reading(
+        message, state, question=message.text.strip()[:500], tg_id=message.from_user.id
+    )
 
 
-async def send_invoice_for_reading(message: Message, state: FSMContext, question: str | None) -> None:
+async def send_invoice_for_reading(
+    message: Message, state: FSMContext, question: str | None, tg_id: int
+) -> None:
     data = await state.get_data()
     spread = SPREADS[data["spread_key"]]
     await state.update_data(question=question)
+    if tg_id in config.admin_ids:  # админам бесплатно (тест-режим)
+        user = await db.get_or_create_user(tg_id)
+        await deliver_reading(message, state, user, spread.key, charge_id=None)
+        return
     await message.answer_invoice(
         title=f"Расклад «{spread.title}»",
         description=(question or spread.description)[:255],
@@ -141,7 +149,7 @@ async def on_payment(message: Message, state: FSMContext) -> None:
 
 
 async def deliver_reading(
-    message: Message, state: FSMContext, user: dict, spread_key: str, charge_id: str
+    message: Message, state: FSMContext, user: dict, spread_key: str, charge_id: str | None
 ) -> None:
     assert message.bot
     spread = SPREADS[spread_key]
@@ -157,12 +165,13 @@ async def deliver_reading(
         rtype=spread.key,
         question=question,
         cards=cards_json,
-        price_stars=spread.price,
+        price_stars=spread.price if charge_id else 0,
         charge_id=charge_id,
         clarifications_left=config.free_clarifications,
     )
 
-    await message.answer("🎴 Оплата получена. Тасую колоду и раскладываю карты…")
+    prefix = "🎴 Оплата получена. " if charge_id else "🎴 Админ-режим, без оплаты. "
+    await message.answer(prefix + "Тасую колоду и раскладываю карты…")
     subtitle = f"Вопрос: {question[:60]}…" if question and len(question) > 60 else (f"Вопрос: {question}" if question else "")
     try:
         await send_reading_media(message.bot, message.chat.id, drawn, spread, subtitle)
@@ -194,7 +203,11 @@ async def clarify_start(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Расклад не найден", show_alert=True)
         return
     await callback.answer()
-    if reading["clarifications_left"] > 0:
+    if callback.from_user.id in config.admin_ids:  # админам бесплатно, лимит не тратится
+        await state.set_state(ClarifyFlow.question)
+        await state.update_data(reading_id=reading_id, free=False)
+        await callback.message.answer("🔍 Напиши уточняющий вопрос (админ-режим, бесплатно).")
+    elif reading["clarifications_left"] > 0:
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=True)
         await callback.message.answer("🔍 Напиши уточняющий вопрос к этому раскладу одним сообщением.")
