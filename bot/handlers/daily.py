@@ -63,7 +63,7 @@ async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
         interpreter.interpret_daily(dc, user.get("name")),
         db.cache_get(anim_key),
     )
-    caption = md_bold_to_html(text)
+    caption = f"<blockquote>{md_bold_to_html(text)}</blockquote>"
     markup = kb.daily_upsell(remind_on, share_query=f"d:{dc.card.id}:{orientation}")
 
     sent = None

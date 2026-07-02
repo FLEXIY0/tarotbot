@@ -20,14 +20,14 @@ log = logging.getLogger(__name__)
 
 
 def reading_caption(drawn: list[DrawnCard], spread: Spread, question: str | None) -> str:
-    lines = [f"<b>{spread.title}</b>"]
+    head = [f"<b>{spread.title}</b>"]
     if question:
         import html
 
-        lines.append(f"<i>{html.escape(question[:150])}</i>")
-    lines.append("")
-    lines.extend(f"{slot.label} — {dc.title}" for slot, dc in zip(spread.slots, drawn))
-    return "\n".join(lines)[:1024]
+        head.append(f"<i>{html.escape(question[:150])}</i>")
+    cards = "\n".join(f"{slot.label} — {dc.title}" for slot, dc in zip(spread.slots, drawn))
+    caption = "\n".join(head) + f"\n<blockquote>{cards}</blockquote>"
+    return caption[:1024]
 
 
 async def send_reading_media(

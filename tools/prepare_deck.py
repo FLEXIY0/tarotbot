@@ -56,46 +56,37 @@ def process(card_id: str) -> str:
 
 
 def make_back() -> None:
-    """Рубашка: глубокие чернила, двойная волосяная рамка, полумесяц со звездой."""
+    """Рубашка карты: тёмно-синее поле, двойная золотая рамка, узор из звёзд."""
     out = ROOT / "assets" / "back.png"
     if out.exists():
         return
-    import random
-
     w, h = 600, 900
-    ink = (14, 13, 26)
-    gold = (201, 170, 108)
-    gold_dim = (110, 94, 66)
-    img = Image.new("RGB", (w, h), ink)
+    img = Image.new("RGB", (w, h), (24, 22, 56))
     d = ImageDraw.Draw(img)
-    for y in range(h):  # едва заметный градиент
-        t = y / h
-        d.line([(0, y), (w, y)], fill=(14 + round(10 * t), 13 + round(7 * t), 26 + round(14 * t)))
+    gold = (196, 164, 90)
+    d.rectangle([14, 14, w - 15, h - 15], outline=gold, width=4)
+    d.rectangle([30, 30, w - 31, h - 31], outline=gold, width=2)
+    # регулярная сетка ромбов со звёздами
+    import math
 
-    rnd = random.Random(3)
-    for _ in range(46):  # редкие тусклые звёзды
-        x, y = rnd.randrange(48, w - 48), rnd.randrange(48, h - 48)
-        c = 70 + rnd.randrange(60)
-        d.point((x, y), fill=(c, c, c + 10))
-    for _ in range(8):  # тонкие искры
-        x, y = rnd.randrange(70, w - 70), rnd.randrange(70, h - 70)
-        r = rnd.choice((4, 6))
-        d.line([(x - r, y), (x + r, y)], fill=gold_dim, width=1)
-        d.line([(x, y - r), (x, y + r)], fill=gold_dim, width=1)
+    def star(cx, cy, r, color):
+        pts = []
+        for i in range(8):
+            ang = math.pi / 4 * i - math.pi / 2
+            rr = r if i % 2 == 0 else r * 0.4
+            pts.append((cx + rr * math.cos(ang), cy + rr * math.sin(ang)))
+        d.polygon(pts, fill=color)
 
-    d.rounded_rectangle([18, 18, w - 19, h - 19], 14, outline=gold_dim, width=2)
-    d.rounded_rectangle([30, 30, w - 31, h - 31], 10, outline=gold_dim, width=1)
-    for cx, cy in ((18, 18), (w - 19, 18), (18, h - 19), (w - 19, h - 19)):
-        d.polygon([(cx, cy - 7), (cx + 7, cy), (cx, cy + 7), (cx - 7, cy)], fill=gold)
-
-    # полумесяц: золотой круг минус смещённый круг фона
-    mx, my, r = w // 2, h // 2 - 20, 92
-    d.ellipse([mx - r, my - r, mx + r, my + r], fill=gold)
-    d.ellipse([mx - r + 46, my - r - 18, mx + r + 46, my + r - 18], fill=(20, 18, 36))
-    # маленькая четырёхлучевая звезда рядом
-    sx, sy = mx + 68, my + 46
-    d.polygon([(sx, sy - 16), (sx + 5, sy - 5), (sx + 16, sy), (sx + 5, sy + 5),
-               (sx, sy + 16), (sx - 5, sy + 5), (sx - 16, sy), (sx - 5, sy - 5)], fill=gold)
+    step = 78
+    for row in range(3, (h - 60) // step):
+        for col in range(1, (w - 60) // step):
+            x = 30 + col * step + (step // 2 if row % 2 else 0)
+            y = 30 + row * step
+            if 60 < x < w - 60 and 60 < y < h - 60:
+                star(x, y, 11, (72, 66, 130))
+    # центральная большая звезда
+    star(w // 2, h // 2, 60, gold)
+    star(w // 2, h // 2, 34, (24, 22, 56))
     img.save(out, "PNG", optimize=True)
     print("ok    back.png")
 

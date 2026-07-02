@@ -18,7 +18,7 @@ from bot.deck import CARD_BY_ID, DrawnCard, draw
 from bot.llm import interpreter
 from bot.ritual import reading_caption, send_reading_media
 from bot.spreads import SPREADS
-from bot.textutil import md_bold_to_html
+from bot.textutil import expandable_quote, md_bold_to_html
 
 router = Router(name="readings")
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class ClarifyFlow(StatesGroup):
 # --- каталог ---
 
 
-PROMO_CACHE_KEY = "catalog_promo:v4"
+PROMO_CACHE_KEY = "catalog_promo:v3"
 
 
 @router.message(Command("spreads"))
@@ -287,9 +287,9 @@ async def _do_reveal(callback: CallbackQuery, reading_id: int) -> None:
         )
         await db.set_interpretation(reading_id, text)
 
-    await callback.message.answer(
-        md_bold_to_html(text),
-        reply_markup=kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify),
+    await _send_interpretation(
+        callback.message, text,
+        kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify),
     )
 
 
@@ -350,7 +350,16 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
         await db.use_clarification(reading["id"])
         reading["clarifications_left"] -= 1
     await db.add_clarification(reading["id"], question, answer)
-    await message.answer(
-        md_bold_to_html(answer),
-        reply_markup=kb.clarify_kb(reading["id"], reading["clarifications_left"], config.price_clarify),
+    await _send_interpretation(
+        message, answer,
+        kb.clarify_kb(reading["id"], reading["clarifications_left"], config.price_clarify),
     )
+
+
+async def _send_interpretation(message: Message, text: str, markup) -> None:
+    """Толкование — в сворачиваемой цитате Telegram; при сбое разметки шлём как есть."""
+    body = md_bold_to_html(text)
+    try:
+        await message.answer(expandable_quote(body), reply_markup=markup)
+    except Exception:
+        await message.answer(body, reply_markup=markup)

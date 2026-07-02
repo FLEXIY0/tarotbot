@@ -55,7 +55,7 @@ def render_catalog_promo() -> Image.Image:
         y0 = pad + (i // 2) * (cell_full + pad)
         tw = d.textlength(spread.title, font=title_font)
         d.text((x0 + (CELL_W - tw) / 2, y0), spread.title, font=title_font, fill=GOLD)
-        price = f"{spread.price} ✦"
+        price = f"{spread.price} ★"
         pw = d.textlength(price, font=price_font)
         d.text((x0 + (CELL_W - pw) / 2, y0 + 40), price, font=price_font, fill=LABEL_COLOR)
         sheet.paste(tile, (x0 + (CELL_W - tile.width) // 2, y0 + HEADER_H + (CELL_H - tile.height) // 2))
