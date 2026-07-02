@@ -121,32 +121,48 @@ def _paste_slot(
 
 
 @lru_cache(maxsize=8)
-def _glow_sprite(width: int, height: int, color: tuple[int, int, int], strength: int) -> Image.Image:
-    """Мягкое свечение-ореол под карту."""
-    pad = 70
+def _shadow_sprite(width: int, height: int) -> Image.Image:
+    """Мягкая тень под карту — глубина без блеска."""
+    pad = 34
     img = Image.new("RGBA", (width + pad * 2, height + pad * 2), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([pad, pad, pad + width, pad + height], 18, fill=(*color, strength))
-    return img.filter(ImageFilter.GaussianBlur(28))
+    d.rounded_rectangle([pad, pad + 8, pad + width, pad + height + 10], 16, fill=(0, 0, 0, 105))
+    return img.filter(ImageFilter.GaussianBlur(12))
 
 
-def _paste_glow(canvas: Image.Image, slot_xy: tuple[int, int], cross: bool, strength: int = 90) -> None:
+def _paste_shadow(canvas: Image.Image, slot_xy: tuple[int, int], cross: bool, alpha: float = 1.0) -> None:
     w, h = (CH, CW) if cross else (CW, CH)
-    glow = _glow_sprite(w, h, GOLD, strength)
-    x = slot_xy[0] + (CW - glow.width) // 2
-    y = slot_xy[1] + (CH - glow.height) // 2
-    canvas.paste(glow, (x, y), glow)
+    shadow = _shadow_sprite(w, h)
+    if alpha < 1.0:
+        shadow = shadow.copy()
+        shadow.putalpha(shadow.getchannel("A").point(lambda a: round(a * alpha)))
+    x = slot_xy[0] + (CW - shadow.width) // 2
+    y = slot_xy[1] + (CH - shadow.height) // 2
+    canvas.paste(shadow, (x, y), shadow)
+
+
+# --- изинги (теория: ease-out для влетающих объектов, in-out для переворотов) ---
 
 
 def _smoothstep(t: float) -> float:
     return t * t * (3 - 2 * t)
 
 
+def _ease_out_cubic(t: float) -> float:
+    return 1 - (1 - t) ** 3
+
+
+def _ease_out_back(t: float, s: float = 1.4) -> float:
+    """Лёгкий overshoot при приземлении — карта чуть «переезжает» и садится."""
+    t -= 1
+    return 1 + (s + 1) * t**3 + s * t**2
+
+
 def render_collage(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> Image.Image:
     base, pos = _base(spread, subtitle)
     canvas = base.copy()
     for dc, slot, xy in zip(drawn, spread.slots, pos):
-        _paste_glow(canvas, xy, slot.cross, strength=70)
+        _paste_shadow(canvas, xy, slot.cross)
         _paste_slot(canvas, _card_face(dc.card.id, dc.is_reversed), xy, slot.cross)
     return canvas
 
@@ -157,73 +173,98 @@ def _squeeze(sprite: Image.Image, factor: float) -> Image.Image:
 
 
 def iter_frames(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> Iterator[Image.Image]:
-    """Кадры ритуала: рубашки ложатся по одной, затем карты открываются
-    с плавным переворотом, подъёмом и золотой вспышкой."""
+    """Кадры ритуала.
+
+    Раздача: карты выбрасываются из центра стола веером — быстрый вылет,
+    вращение, гасящееся к приземлению, лёгкий overshoot (ease-out-back),
+    перекрывающийся стаггер между картами. Затем перевороты с in-out изингом.
+    Без блеска — глубину даёт мягкая тень.
+    """
     base, pos = _base(spread, subtitle)
     back = _card_back()
     faces = [_card_face(dc.card.id, dc.is_reversed) for dc in drawn]
     n = len(drawn)
-    state: list[str | None] = [None] * n  # None | "back" | "face"
-    reveal_age = [999] * n                # кадров с момента открытия (для затухающей вспышки)
 
-    def frame(anim_idx: int | None = None, anim_sprite: Image.Image | None = None, lift: int = 0) -> Image.Image:
-        canvas = base.copy()
+    # центр стола — точка вылета
+    cxs = [xy[0] + CW / 2 for xy in pos]
+    cys = [xy[1] + CH / 2 for xy in pos]
+    origin = (sum(cxs) / n, sum(cys) / n)
+
+    # детерминированное вращение: чередуем направление, ~⅔ оборота
+    spins = [(-1 if i % 2 else 1) * (200 + (i * 53) % 70) for i in range(n)]
+
+    landed = [False] * n
+    opened = [False] * n
+
+    def draw_landed(canvas: Image.Image) -> None:
         for i, (slot, xy) in enumerate(zip(spread.slots, pos)):
-            if state[i] == "face":
-                flash = max(0, 160 - reveal_age[i] * 22)  # вспышка гаснет ~7 кадров
-                _paste_glow(canvas, xy, slot.cross, strength=70 + flash)
-                _paste_slot(canvas, faces[i], xy, slot.cross)
-            elif state[i] == "back" and anim_idx != i:
-                _paste_slot(canvas, back, xy, slot.cross)
-            if anim_idx == i and anim_sprite is not None:
-                _paste_glow(canvas, xy, slot.cross, strength=110)
-                _paste_slot(canvas, anim_sprite, xy, slot.cross, lift=lift)
-        for i in range(n):
-            reveal_age[i] += 1
-        return canvas
+            if landed[i]:
+                _paste_shadow(canvas, xy, slot.cross)
+                _paste_slot(canvas, faces[i] if opened[i] else back, xy, slot.cross)
 
     def repeat(img: Image.Image, times: int) -> Iterator[Image.Image]:
         for _ in range(times):
             yield img
 
-    def fade_scale(sprite: Image.Image, t: float) -> Image.Image:
-        """Появление: карта опускается на стол, вырастая из 55% и проявляясь."""
-        f = 0.55 + 0.45 * t
-        s = sprite.resize((max(2, round(sprite.width * f)), max(2, round(sprite.height * f))), Image.BILINEAR)
-        alpha = s.getchannel("A").point(lambda a: round(a * min(1.0, t * 1.4)))
-        s.putalpha(alpha)
-        return s
+    yield base.copy()
 
-    yield frame()
-    # раздача: каждая рубашка прилетает с масштабированием и растворением
-    deal_steps = 6
-    deal_hold = 2 if n > 4 else 4
-    for i in range(n):
-        for step in range(1, deal_steps + 1):
-            t = _smoothstep(step / deal_steps)
-            sprite = fade_scale(back, t)
-            lift = round((1 - t) * 34)
-            yield frame(anim_idx=i, anim_sprite=sprite, lift=lift)
-        state[i] = "back"
-        yield from repeat(frame(), deal_hold)
-    # перевороты: smoothstep-изинг, карта приподнимается на пике
+    # --- раздача из центра, стаггер: следующая карта стартует до приземления предыдущей
+    deal_dur = 11          # ~0.46 c полёта
+    stagger = 5 if n > 4 else 7
+    total = (n - 1) * stagger + deal_dur
+    for g in range(1, total + 1):
+        canvas = base.copy()
+        draw_landed(canvas)
+        for i, (slot, xy) in enumerate(zip(spread.slots, pos)):
+            lt = (g - i * stagger) / deal_dur
+            if lt <= 0 or landed[i]:
+                continue
+            if lt >= 1:
+                landed[i] = True
+                _paste_shadow(canvas, xy, slot.cross)
+                _paste_slot(canvas, back, xy, slot.cross)
+                continue
+            t_pos = _ease_out_back(_ease_out_cubic(lt))     # траектория с мягким overshoot
+            t_rot = _ease_out_cubic(lt)                     # вращение гаснет к посадке
+            target = (xy[0] + CW / 2, xy[1] + CH / 2)
+            x = origin[0] + (target[0] - origin[0]) * t_pos
+            y = origin[1] + (target[1] - origin[1]) * t_pos
+            scale = 0.62 + 0.38 * _ease_out_cubic(lt)
+            angle = spins[i] * (1 - t_rot) + (90 if slot.cross else 0)
+            sprite = back.resize(
+                (max(2, round(CW * scale)), max(2, round(CH * scale))), Image.BILINEAR
+            ).rotate(angle, expand=True, resample=Image.BILINEAR)
+            _paste_shadow(canvas, xy, slot.cross, alpha=0.35 * lt)
+            canvas.paste(sprite, (round(x - sprite.width / 2), round(y - sprite.height / 2)), sprite)
+        yield canvas
+
+    settle = base.copy()
+    draw_landed(settle)
+    yield from repeat(settle, 7)
+
+    # --- перевороты: in-out изинг, лёгкий подъём на пике
     flip_steps = 10
-    hold_after = 6 if n > 4 else 10
-    for i in range(n):
-        state[i] = "back"
+    hold_after = 5 if n > 4 else 9
+    for i, (slot, xy) in enumerate(zip(spread.slots, pos)):
         for step in range(1, flip_steps + 1):
             t = _smoothstep(step / flip_steps)
             factor = abs(math.cos(math.pi * t))
-            lift = round(math.sin(math.pi * t) * 16)
+            lift = round(math.sin(math.pi * t) * 12)
             sprite = _squeeze(back if t < 0.5 else faces[i], max(factor, 0.04))
-            yield frame(anim_idx=i, anim_sprite=sprite, lift=lift)
-        state[i] = "face"
-        reveal_age[i] = 0
-        for _ in range(hold_after):
-            yield frame()
+            canvas = base.copy()
+            landed[i] = False
+            draw_landed(canvas)
+            landed[i] = True
+            _paste_shadow(canvas, xy, slot.cross)
+            _paste_slot(canvas, sprite, xy, slot.cross, lift=lift)
+            yield canvas
+        opened[i] = True
+        canvas = base.copy()
+        draw_landed(canvas)
+        yield from repeat(canvas, hold_after)
+
     # долгая финальная пауза, чтобы зацикленный повтор не мельтешил
-    final = render_collage(drawn, spread, subtitle)
-    yield from repeat(final, FPS * 4)
+    yield from repeat(render_collage(drawn, spread, subtitle), FPS * 4)
 
 
 def render_daily_card(dc: DrawnCard, date_str: str = "") -> Image.Image:
