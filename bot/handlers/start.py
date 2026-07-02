@@ -11,18 +11,17 @@ from bot.db import db
 router = Router(name="start")
 
 DISCLAIMER = (
-    "🕯 Бот — развлекательный сервис и не заменяет профессиональную консультацию "
+    "Бот — развлекательный сервис и не заменяет профессиональную консультацию "
     "врача, юриста или финансового советника."
 )
 
 HELP_TEXT = (
-    "🔮 <b>Что я умею</b>\n\n"
-    f"{kb.BTN_DAILY} — бесплатная карта дня, раз в сутки.\n"
-    f"{kb.BTN_SPREADS} — персональные расклады с видео-ритуалом и подробной "
-    "интерпретацией. После каждого расклада можно задать уточняющие вопросы.\n"
-    f"{kb.BTN_HISTORY} — все твои прошлые расклады.\n\n"
-    "Оплата — в Telegram Stars (⭐). Купить звёзды можно прямо в Telegram.\n"
-    "Вопросы по оплате: /paysupport\n\n" + DISCLAIMER
+    "<b>Что я умею</b>\n\n"
+    f"<b>{kb.BTN_DAILY}</b> — бесплатная карта дня, раз в сутки.\n"
+    f"<b>{kb.BTN_SPREADS}</b> — персональные расклады с ритуалом и подробным "
+    "толкованием. После каждого расклада можно задать уточняющие вопросы.\n"
+    f"<b>{kb.BTN_HISTORY}</b> — все твои прошлые расклады.\n\n"
+    "Оплата — в Telegram Stars. Вопросы по оплате: /paysupport\n\n" + DISCLAIMER
 )
 
 
@@ -42,14 +41,14 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
     user = await db.get_or_create_user(message.from_user.id, referrer)
     if user.get("name"):
         await message.answer(
-            f"С возвращением, {user['name']}! 🌙 Карты уже ждут.", reply_markup=kb.main_menu
+            f"С возвращением, {user['name']}. Карты уже ждут.", reply_markup=kb.main_menu
         )
         return
     await message.answer(
-        "🌙 Приветствую! Я — Люмина, твой проводник в мир Таро.\n\n"
-        "Я делаю персональные расклады: ты задаёшь вопрос, я тяну карты из настоящей "
+        "Приветствую. Я — Люмина, твой проводник в мир Таро.\n\n"
+        "Я делаю персональные расклады: ты задаёшь вопрос, я тяну карты из "
         "колоды Райдера–Уэйта и читаю их для тебя.\n\n"
-        "Чтобы расклады были точнее, давай познакомимся. <b>Как тебя зовут?</b>\n\n" + DISCLAIMER,
+        "Чтобы расклады были точнее, давай познакомимся. <b>Как тебя зовут?</b>\n\n<i>" + DISCLAIMER + "</i>",
         reply_markup=kb.onboarding_skip("name"),
     )
     await state.set_state(Onboarding.name)
@@ -71,9 +70,9 @@ async def onb_skip_name(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 async def ask_birth(message: Message, state: FSMContext, name: str | None) -> None:
-    hello = f"Очень приятно, {name}! " if name else ""
+    hello = f"Очень приятно, {name}. " if name else ""
     await message.answer(
-        f"{hello}✨ Теперь — <b>дата рождения</b> (например, 21.03.1995). "
+        f"{hello}Теперь — <b>дата рождения</b> (например, 21.03.1995). "
         "Она поможет мне тоньше настроиться на твою энергию.",
         reply_markup=kb.onboarding_skip("birth"),
     )
@@ -97,7 +96,7 @@ async def onb_skip_birth(callback: CallbackQuery, state: FSMContext) -> None:
 async def finish_onboarding(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
-        "Готово! 🌙 Начни с бесплатной <b>карты дня</b> — она уже ждёт тебя.",
+        "Готово. Начни с бесплатной <b>карты дня</b> — она уже ждёт тебя.",
         reply_markup=kb.main_menu,
     )
 
@@ -111,8 +110,8 @@ async def cmd_help(message: Message) -> None:
 @router.message(Command("paysupport"))
 async def cmd_paysupport(message: Message) -> None:
     await message.answer(
-        "💫 <b>Поддержка по оплате</b>\n\n"
-        "Оплата принимается в Telegram Stars (⭐).\n\n"
+        "<b>Поддержка по оплате</b>\n\n"
+        "Оплата принимается в Telegram Stars.\n\n"
         "<b>Возвраты.</b> Если расклад не был доставлен из-за технического сбоя — напишите нам, "
         "и мы вернём звёзды. Возврат за корректно доставленный расклад не предусмотрен, "
         "так как услуга оказывается в момент генерации.\n\n"

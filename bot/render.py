@@ -67,6 +67,13 @@ def _slot_px(spread: Spread) -> tuple[list[tuple[int, int]], int, int]:
         w += (CH - CW) // 2
     h = TITLE_H + MARGIN + round(max(ys) * CH) + CH + LABEL_H + MARGIN
     pos = [(MARGIN + round(s.x * CW), TITLE_H + MARGIN + round(s.y * CH)) for s in spread.slots]
+    # Telegram обрезает вытянутые гифки в пузыре — держим кадр не уже 4:5
+    max_ratio = 1.25
+    if h > w * max_ratio:
+        new_w = math.ceil(h / max_ratio)
+        shift = (new_w - w) // 2
+        pos = [(x + shift, y) for x, y in pos]
+        w = new_w
     return pos, w + w % 2, h + h % 2
 
 

@@ -69,6 +69,8 @@ class Database:
         for ddl in (
             "ALTER TABLE users ADD COLUMN remind_daily INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN reminded_date TEXT",
+            "ALTER TABLE readings ADD COLUMN media_file_id TEXT",
+            "ALTER TABLE readings ADD COLUMN media_type TEXT",
         ):
             try:
                 await self._conn.execute(ddl)
@@ -126,6 +128,13 @@ class Database:
         await self.conn.commit()
         assert cur.lastrowid is not None
         return cur.lastrowid
+
+    async def set_reading_media(self, reading_id: int, file_id: str, media_type: str) -> None:
+        await self.conn.execute(
+            "UPDATE readings SET media_file_id = ?, media_type = ? WHERE id = ?",
+            (file_id, media_type, reading_id),
+        )
+        await self.conn.commit()
 
     async def set_interpretation(self, reading_id: int, text: str) -> None:
         await self.conn.execute("UPDATE readings SET interpretation = ? WHERE id = ?", (text, reading_id))

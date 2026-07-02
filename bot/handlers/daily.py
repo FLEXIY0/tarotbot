@@ -24,23 +24,36 @@ def _today() -> str:
     return datetime.now(ZoneInfo(config.tz)).date().isoformat()
 
 
+_in_flight: set[int] = set()
+
+
 async def send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
+    if tg_id in _in_flight:  # дедуп двойного тапа
+        return
+    _in_flight.add(tg_id)
+    try:
+        await _send_daily(bot, chat_id, tg_id)
+    finally:
+        _in_flight.discard(tg_id)
+
+
+async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
     user = await db.get_or_create_user(tg_id)
     today = _today()
     remind_on = bool(user.get("remind_daily"))
     if user.get("daily_card_date") == today:
         await bot.send_message(
             chat_id,
-            "🌙 Карту дня ты уже получил(а) сегодня — новая будет после полуночи.\n"
-            "А пока можно разобрать конкретный вопрос в разделе «🔮 Расклады».",
-            reply_markup=kb.daily_upsell(remind_on, tg_id),
+            "Карту дня ты уже получил(а) сегодня — новая появится после полуночи.\n"
+            "А пока можно разобрать конкретный вопрос в «Раскладах».",
+            reply_markup=kb.daily_upsell(remind_on),
         )
         return
 
     await db.update_user(tg_id, daily_card_date=today)
     dc = draw(1)[0]
     orientation = "r" if dc.is_reversed else "u"
-    status = await bot.send_message(chat_id, "🎴 Тасую колоду и тяну твою карту дня…")
+    status = await bot.send_message(chat_id, "Тасую колоду и тяну твою карту дня…")
     date_str = datetime.now(ZoneInfo(config.tz)).strftime("%d.%m.%Y")
     cache_key = f"dailyimg:{dc.card.id}:{orientation}"
 
@@ -50,10 +63,7 @@ async def send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
         db.cache_get(cache_key),
     )
     caption = md_bold_to_html(text)
-    upsell = "\n\n💫 Разобрать конкретный вопрос → «🔮 Расклады»"
-    if len(text) + len(upsell) <= 1000:
-        caption += upsell
-    markup = kb.daily_upsell(remind_on, tg_id)
+    markup = kb.daily_upsell(remind_on, share_query=f"d:{dc.card.id}:{orientation}")
 
     sent = None
     if cached:
@@ -95,14 +105,12 @@ async def toggle_reminder(callback: CallbackQuery) -> None:
     on = callback.data == "remind:on"
     await db.update_user(callback.from_user.id, remind_daily=int(on))
     await callback.answer(
-        "🔔 Буду присылать карту дня каждое утро!" if on else "🔕 Напоминания отключены.",
+        "Буду присылать карту дня каждое утро." if on else "Напоминания отключены.",
         show_alert=False,
     )
     with suppress(Exception):
         if callback.message.photo:
-            await callback.message.edit_reply_markup(
-                reply_markup=kb.daily_upsell(on, callback.from_user.id)
-            )
+            await callback.message.edit_reply_markup(reply_markup=kb.daily_upsell(on))
         else:
             await callback.message.edit_reply_markup(reply_markup=None)
 
@@ -118,7 +126,7 @@ async def reminder_loop(bot: Bot) -> None:
                 with suppress(Exception):
                     await bot.send_message(
                         tg_id,
-                        "🌅 Доброе утро! Твоя карта дня уже ждёт в колоде.",
+                        "Доброе утро! Твоя карта дня уже ждёт в колоде.",
                         reply_markup=kb.reminder_kb(),
                     )
                 await asyncio.sleep(0.1)

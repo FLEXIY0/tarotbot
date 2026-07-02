@@ -20,13 +20,13 @@ log = logging.getLogger(__name__)
 
 
 def reading_caption(drawn: list[DrawnCard], spread: Spread, question: str | None) -> str:
-    lines = [f"{spread.emoji} <b>{spread.title}</b>"]
+    lines = [f"<b>{spread.title}</b>"]
     if question:
         import html
 
         lines.append(f"<i>{html.escape(question[:150])}</i>")
     lines.append("")
-    lines.extend(f"▫️ {slot.label} — {dc.title}" for slot, dc in zip(spread.slots, drawn))
+    lines.extend(f"{slot.label} — {dc.title}" for slot, dc in zip(spread.slots, drawn))
     return "\n".join(lines)[:1024]
 
 

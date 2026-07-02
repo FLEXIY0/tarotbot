@@ -35,17 +35,16 @@ class ClarifyFlow(StatesGroup):
 # --- каталог ---
 
 
-PROMO_CACHE_KEY = "catalog_promo:v1"
+PROMO_CACHE_KEY = "catalog_promo:v2"
 
 
 @router.message(Command("spreads"))
 @router.message(F.text == kb.BTN_SPREADS)
 async def catalog(message: Message) -> None:
     assert message.bot
-    lines = ["🔮 <b>Расклады</b>\n"]
+    lines = ["<b>Расклады</b>\n"]
     for s in SPREADS.values():
-        lines.append(f"{s.emoji} <b>{s.title}</b> — {s.price} ⭐\n<i>{s.description}</i>\n")
-    lines.append("Выбери расклад:")
+        lines.append(f"<b>{s.title}</b> — {s.price} ⭐\n<i>{s.description}</i>\n")
     caption = "\n".join(lines)[:1024]
 
     cached = await db.cache_get(PROMO_CACHE_KEY)
@@ -91,9 +90,8 @@ async def pick_spread(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(ReadingFlow.question)
     await state.update_data(spread_key=spread.key)
     await callback.message.answer(
-        f"{spread.emoji} <b>{spread.title}</b> — {spread.price} ⭐\n\n"
-        "✍️ Сформулируй свой вопрос одним сообщением. Чем конкретнее вопрос, "
-        "тем точнее ответ карт.",
+        f"<b>{spread.title}</b> — {spread.price} ⭐\n\n"
+        "Напиши свой вопрос одним сообщением. Чем конкретнее вопрос, тем точнее ответ.",
         reply_markup=kb.skip_question(),
     )
 
@@ -103,7 +101,7 @@ async def cancel_question(callback: CallbackQuery, state: FSMContext) -> None:
     assert isinstance(callback.message, Message)
     await state.clear()
     await callback.answer("Отменено")
-    await callback.message.answer("Хорошо, вернёмся, когда будешь готов(а). 🌙", reply_markup=kb.main_menu)
+    await callback.message.answer("Хорошо, вернёмся, когда будешь готов(а).", reply_markup=kb.main_menu)
 
 
 @router.callback_query(ReadingFlow.question, F.data == "q:skip")
@@ -127,6 +125,7 @@ async def send_invoice_for_reading(
     data = await state.get_data()
     spread = SPREADS[data["spread_key"]]
     await state.update_data(question=question)
+    await state.set_state(None)  # дедуп: повторное сообщение не запустит второй расклад
     if tg_id in config.admin_ids:  # админам бесплатно (тест-режим)
         user = await db.get_or_create_user(tg_id)
         await deliver_reading(message, state, user, spread.key, charge_id=None)
@@ -175,7 +174,7 @@ async def on_payment(message: Message, state: FSMContext) -> None:
         reading_id = int(payload.split(":", 1)[1])
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=False)
-        await message.answer("💫 Оплата получена! Напиши свой уточняющий вопрос одним сообщением.")
+        await message.answer("Оплата получена. Напиши свой уточняющий вопрос одним сообщением.")
 
 
 async def deliver_reading(
@@ -200,7 +199,7 @@ async def deliver_reading(
         clarifications_left=config.free_clarifications,
     )
 
-    prefix = "🎴 Оплата получена. " if charge_id else "🎴 Админ-режим, без оплаты. "
+    prefix = "Оплата получена. " if charge_id else "Админ-режим, без оплаты. "
     status = await message.answer(prefix + "Тасую колоду и раскладываю карты…")
 
     # толкование пишется в фоне, пока пользователь смотрит анимацию
@@ -211,10 +210,16 @@ async def deliver_reading(
     subtitle = f"Вопрос: {question[:60]}…" if question and len(question) > 60 else (f"Вопрос: {question}" if question else "")
     caption = reading_caption(drawn, spread, question)
     try:
-        await send_reading_media(
+        sent = await send_reading_media(
             message.bot, message.chat.id, drawn, spread, subtitle,
             caption=caption, reply_markup=kb.reveal_kb(reading_id),
         )
+        if sent:  # file_id пригодится для «Отправить другу» через inline
+            anim = sent.animation or sent.video
+            if anim:
+                await db.set_reading_media(reading_id, anim.file_id, "gif")
+            elif sent.photo:
+                await db.set_reading_media(reading_id, sent.photo[-1].file_id, "photo")
     except Exception:
         log.exception("Медиа расклада %d не отправилось", reading_id)
     with suppress(Exception):
@@ -238,18 +243,33 @@ async def _generate_interpretation(
         log.exception("Фоновая интерпретация расклада %d не удалась", reading_id)
 
 
+_revealing: set[int] = set()
+
+
 @router.callback_query(F.data.startswith("reveal:"))
 async def reveal_interpretation(callback: CallbackQuery) -> None:
     assert callback.data and callback.from_user and isinstance(callback.message, Message)
     reading_id = int(callback.data.split(":", 1)[1])
+    if reading_id in _revealing:  # дедуп двойного тапа
+        await callback.answer("Уже раскрываю…")
+        return
+    _revealing.add(reading_id)
+    try:
+        await _do_reveal(callback, reading_id)
+    finally:
+        _revealing.discard(reading_id)
+
+
+async def _do_reveal(callback: CallbackQuery, reading_id: int) -> None:
+    assert callback.from_user and isinstance(callback.message, Message)
     reading = await db.get_reading(reading_id)
     user = await db.get_or_create_user(callback.from_user.id)
     if not reading or reading["user_id"] != user["id"]:
         await callback.answer("Расклад не найден", show_alert=True)
         return
-    await callback.answer("✨ Читаю карты…")
+    await callback.answer("Читаю карты…")
     with suppress(Exception):
-        await callback.message.edit_reply_markup(reply_markup=kb.shared_reading_kb(callback.from_user.id))
+        await callback.message.edit_reply_markup(reply_markup=kb.shared_reading_kb(reading_id))
 
     # ждём фоновую генерацию; если её нет (например, после рестарта) — делаем сами
     text = reading["interpretation"]
@@ -269,7 +289,7 @@ async def reveal_interpretation(callback: CallbackQuery) -> None:
 
     await callback.message.answer(
         md_bold_to_html(text),
-        reply_markup=kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify, callback.from_user.id),
+        reply_markup=kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify),
     )
 
 
@@ -289,11 +309,11 @@ async def clarify_start(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.from_user.id in config.admin_ids:  # админам бесплатно, лимит не тратится
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=False)
-        await callback.message.answer("🔍 Напиши уточняющий вопрос (админ-режим, бесплатно).")
+        await callback.message.answer("Напиши уточняющий вопрос (админ-режим, бесплатно).")
     elif reading["clarifications_left"] > 0:
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=True)
-        await callback.message.answer("🔍 Напиши уточняющий вопрос к этому раскладу одним сообщением.")
+        await callback.message.answer("Напиши уточняющий вопрос к этому раскладу одним сообщением.")
     else:
         await callback.message.answer_invoice(
             title="Уточняющий вопрос",
@@ -312,7 +332,7 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
     reading = await db.get_reading(data["reading_id"])
     user = await db.get_or_create_user(message.from_user.id)
     if not reading or reading["user_id"] != user["id"]:
-        await message.answer("Не нашёл этот расклад. Попробуй сделать новый. 🌙")
+        await message.answer("Не нашёл этот расклад. Попробуй сделать новый.")
         return
 
     spread = SPREADS[reading["type"]]
@@ -321,7 +341,7 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
     ]
     prior = await db.get_clarifications(reading["id"])
     question = message.text.strip()[:500]
-    await message.answer("🔮 Вглядываюсь в карты…")
+    await message.answer("Вглядываюсь в карты…")
     answer = await interpreter.clarify(
         drawn, spread, reading["question"], reading["interpretation"] or "",
         prior, question, user.get("name"),
@@ -332,5 +352,5 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
     await db.add_clarification(reading["id"], question, answer)
     await message.answer(
         md_bold_to_html(answer),
-        reply_markup=kb.clarify_kb(reading["id"], reading["clarifications_left"], config.price_clarify, message.from_user.id),
+        reply_markup=kb.clarify_kb(reading["id"], reading["clarifications_left"], config.price_clarify),
     )

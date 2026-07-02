@@ -111,7 +111,7 @@ class Interpreter:
         if text:
             return text
         return (
-            f"🌙 Сегодня тебе выпала карта **{dc.title}**.\n\n"
+            f"Сегодня тебе выпала карта **{dc.title}**.\n\n"
             f"Её энергии дня: {dc.meaning}. Понаблюдай, где эти темы проявятся сегодня, — "
             "карта подсвечивает то, что просит твоего внимания."
         )
@@ -142,20 +142,20 @@ class Interpreter:
         text = await self._complete("\n\n".join(parts), max_tokens=800)
         return text or (
             "Карты уже сказали главное в раскладе выше — перечитай позиции, которые "
-            "откликаются на твой вопрос. Если хочется нового ответа, лучше сделать отдельный расклад. ✨"
+            "откликаются на твой вопрос. Если хочется нового ответа, лучше сделать отдельный расклад."
         )
 
     @staticmethod
     def fallback(drawn: list[DrawnCard], spread: Spread, name: str | None) -> str:
         """Интерпретация из статических значений — пользователь не остаётся без результата."""
         who = f"{name}, " if name else ""
-        lines = [f"✨ {who}вот что показали карты в раскладе «{spread.title}»:\n"]
+        lines = [f"{who}вот что показали карты в раскладе «{spread.title}»:\n"]
         for slot, dc in zip(spread.slots, drawn):
-            lines.append(f"🔮 **{slot.label}** — **{dc.title}**: {dc.meaning}.")
+            lines.append(f"**{slot.label}** — **{dc.title}**: {dc.meaning}.")
         lines.append(
             "\nСоедини эти образы с тем, что происходит в твоей ситуации, — карты описывают "
             "энергии, а выбор всегда остаётся за тобой. Задай уточняющий вопрос, если что-то "
-            "хочется раскрыть глубже. 🌙"
+            "хочется раскрыть глубже."
         )
         return "\n".join(lines)
 
