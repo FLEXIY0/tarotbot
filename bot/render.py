@@ -20,6 +20,8 @@ MARGIN = 56
 TITLE_H = 0  # заголовок в кадре убран: он дублировал подпись сообщения и резался
 LABEL_H = 40
 FPS = 24
+MAX_MEDIA_RATIO = 1.13
+RITUAL_SECONDS = 20  # общая длина гифки ритуала
 
 BG_TOP = (16, 14, 38)
 BG_BOTTOM = (36, 24, 62)
@@ -67,8 +69,8 @@ def _slot_px(spread: Spread) -> tuple[list[tuple[int, int]], int, int]:
         w += (CH - CW) // 2
     h = TITLE_H + MARGIN + round(max(ys) * CH) + CH + LABEL_H + MARGIN
     pos = [(MARGIN + round(s.x * CW), TITLE_H + MARGIN + round(s.y * CH)) for s in spread.slots]
-    # Telegram обрезает вытянутые гифки в пузыре — держим кадр не уже 4:5
-    max_ratio = 1.25
+    # Telegram обрезает вытянутые гифки в пузыре — держим кадр почти квадратным
+    max_ratio = MAX_MEDIA_RATIO
     if h > w * max_ratio:
         new_w = math.ceil(h / max_ratio)
         shift = (new_w - w) // 2
@@ -262,10 +264,12 @@ def iter_frames(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> I
         draw_landed(canvas)
         yield from repeat(canvas, hold_after)
 
-    # долгая финальная пауза + плавное затухание на стыке цикла
+    # финальная пауза добивает гифку до RITUAL_SECONDS + затухание на стыке цикла
+    emitted = [1 + total + 7 + n * (flip_steps + hold_after)]  # кадры динамики выше
     final = render_collage(drawn, spread, subtitle)
-    yield from repeat(final, FPS * 5)
     fade_frames = 10
+    hold = max(FPS * 3, FPS * RITUAL_SECONDS - emitted[0] - fade_frames)
+    yield from repeat(final, hold)
     dark = Image.new("RGB", final.size, BG_TOP)
     for step in range(1, fade_frames + 1):
         yield Image.blend(final, dark, _smoothstep(step / fade_frames))
@@ -281,7 +285,7 @@ def with_fade_in(frames: Iterator[Image.Image], fade_frames: int = 8) -> Iterato
     yield from frames
 
 
-DAILY_W, DAILY_H = 720, 900          # пропорция 4:5 — не режется в пузыре Telegram
+DAILY_W, DAILY_H = 720, 812          # пропорция ~1.13 — не режется в пузыре Telegram
 DAILY_FRAMES = 132                   # 5.5 c бесшовного цикла
 
 
@@ -296,9 +300,9 @@ def _daily_scene(dc: DrawnCard, date_str: str):
         t = y / h
         d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
 
-    card_w = 360
+    card_w = 350
     card = _card_face(dc.card.id, dc.is_reversed, width=card_w)
-    cx, cy = (w - card.width) // 2, 62
+    cx, cy = (w - card.width) // 2, 50
 
     name_font = _font("DejaVuSerif-Bold.ttf", 32)
     nw = d.textlength(dc.card.name, font=name_font)
