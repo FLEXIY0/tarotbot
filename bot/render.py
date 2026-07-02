@@ -105,29 +105,48 @@ def _base(spread: Spread, subtitle: str = "") -> tuple[Image.Image, list[tuple[i
     return img, pos
 
 
-def _paste_slot(canvas: Image.Image, sprite: Image.Image, slot_xy: tuple[int, int], cross: bool) -> None:
+def _paste_slot(
+    canvas: Image.Image,
+    sprite: Image.Image,
+    slot_xy: tuple[int, int],
+    cross: bool,
+    lift: int = 0,
+) -> None:
     x, y = slot_xy
     if cross:
         sprite = sprite.rotate(90, expand=True)
-        x += (CW - sprite.width) // 2
-        y += (CH - sprite.height) // 2
-    else:
-        x += (CW - sprite.width) // 2
-        y += (CH - sprite.height) // 2
+    x += (CW - sprite.width) // 2
+    y += (CH - sprite.height) // 2 - lift
     canvas.paste(sprite, (x, y), sprite)
+
+
+@lru_cache(maxsize=8)
+def _glow_sprite(width: int, height: int, color: tuple[int, int, int], strength: int) -> Image.Image:
+    """Мягкое свечение-ореол под карту."""
+    pad = 70
+    img = Image.new("RGBA", (width + pad * 2, height + pad * 2), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([pad, pad, pad + width, pad + height], 18, fill=(*color, strength))
+    return img.filter(ImageFilter.GaussianBlur(28))
+
+
+def _paste_glow(canvas: Image.Image, slot_xy: tuple[int, int], cross: bool, strength: int = 90) -> None:
+    w, h = (CH, CW) if cross else (CW, CH)
+    glow = _glow_sprite(w, h, GOLD, strength)
+    x = slot_xy[0] + (CW - glow.width) // 2
+    y = slot_xy[1] + (CH - glow.height) // 2
+    canvas.paste(glow, (x, y), glow)
+
+
+def _smoothstep(t: float) -> float:
+    return t * t * (3 - 2 * t)
 
 
 def render_collage(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> Image.Image:
     base, pos = _base(spread, subtitle)
     canvas = base.copy()
     for dc, slot, xy in zip(drawn, spread.slots, pos):
-        shadow = Image.new("RGBA", (CW + 16, CH + 16), (0, 0, 0, 0))
-        ImageDraw.Draw(shadow).rounded_rectangle([8, 10, CW + 8, CH + 12], 14, fill=(0, 0, 0, 120))
-        canvas.paste(
-            shadow.filter(ImageFilter.GaussianBlur(5)),
-            (xy[0] - 8, xy[1] - 8),
-            shadow.filter(ImageFilter.GaussianBlur(5)),
-        )
+        _paste_glow(canvas, xy, slot.cross, strength=70)
         _paste_slot(canvas, _card_face(dc.card.id, dc.is_reversed), xy, slot.cross)
     return canvas
 
@@ -138,47 +157,105 @@ def _squeeze(sprite: Image.Image, factor: float) -> Image.Image:
 
 
 def iter_frames(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> Iterator[Image.Image]:
-    """Кадры: рубашки ложатся по одной, затем каждая карта переворачивается."""
+    """Кадры ритуала: рубашки ложатся по одной, затем карты открываются
+    с плавным переворотом, подъёмом и золотой вспышкой."""
     base, pos = _base(spread, subtitle)
     back = _card_back()
     faces = [_card_face(dc.card.id, dc.is_reversed) for dc in drawn]
     n = len(drawn)
-    # state[i]: None=пусто, "back", "face"
-    state: list[str | None] = [None] * n
+    state: list[str | None] = [None] * n  # None | "back" | "face"
+    reveal_age = [999] * n                # кадров с момента открытия (для затухающей вспышки)
 
-    def frame(anim_idx: int | None = None, anim_sprite: Image.Image | None = None) -> Image.Image:
+    def frame(anim_idx: int | None = None, anim_sprite: Image.Image | None = None, lift: int = 0) -> Image.Image:
         canvas = base.copy()
         for i, (slot, xy) in enumerate(zip(spread.slots, pos)):
-            if anim_idx == i and anim_sprite is not None:
-                _paste_slot(canvas, anim_sprite, xy, slot.cross)
-            elif state[i] == "back":
-                _paste_slot(canvas, back, xy, slot.cross)
-            elif state[i] == "face":
+            if state[i] == "face":
+                flash = max(0, 160 - reveal_age[i] * 22)  # вспышка гаснет ~7 кадров
+                _paste_glow(canvas, xy, slot.cross, strength=70 + flash)
                 _paste_slot(canvas, faces[i], xy, slot.cross)
+            elif state[i] == "back" and anim_idx != i:
+                _paste_slot(canvas, back, xy, slot.cross)
+            if anim_idx == i and anim_sprite is not None:
+                _paste_glow(canvas, xy, slot.cross, strength=110)
+                _paste_slot(canvas, anim_sprite, xy, slot.cross, lift=lift)
+        for i in range(n):
+            reveal_age[i] += 1
         return canvas
+
+    def repeat(img: Image.Image, times: int) -> Iterator[Image.Image]:
+        for _ in range(times):
+            yield img
 
     yield frame()
     # раздача рубашек
     deal_hold = 3 if n > 4 else 5
     for i in range(n):
         state[i] = "back"
-        f = frame()
-        for _ in range(deal_hold):
-            yield f
-    # перевороты
-    flip_steps = 8
-    hold_after = 5 if n > 4 else 9
+        yield from repeat(frame(), deal_hold)
+    # перевороты: smoothstep-изинг, карта приподнимается на пике
+    flip_steps = 10
+    hold_after = 6 if n > 4 else 10
     for i in range(n):
-        for step in range(flip_steps + 1):
-            t = step / flip_steps
+        state[i] = "back"
+        for step in range(1, flip_steps + 1):
+            t = _smoothstep(step / flip_steps)
             factor = abs(math.cos(math.pi * t))
+            lift = round(math.sin(math.pi * t) * 16)
             sprite = _squeeze(back if t < 0.5 else faces[i], max(factor, 0.04))
-            yield frame(anim_idx=i, anim_sprite=sprite)
+            yield frame(anim_idx=i, anim_sprite=sprite, lift=lift)
         state[i] = "face"
-        f = frame()
+        reveal_age[i] = 0
         for _ in range(hold_after):
-            yield f
-    # финальный кадр
+            yield frame()
+    # долгая финальная пауза, чтобы зацикленный повтор не мельтешил
     final = render_collage(drawn, spread, subtitle)
-    for _ in range(FPS * 2):
-        yield final
+    yield from repeat(final, FPS * 4)
+
+
+def render_daily_card(dc: DrawnCard, date_str: str = "") -> Image.Image:
+    """Статичная открытка «Карта дня»: крупная карта в золотом сиянии."""
+    w, h = 720, 1120
+    img = Image.new("RGB", (w, h), BG_TOP)
+    d = ImageDraw.Draw(img)
+    for y in range(h):
+        t = y / h
+        d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
+    import random
+
+    rnd = random.Random(dc.card.id)  # свой рисунок звёзд у каждой карты
+    for _ in range(140):
+        x, y = rnd.randrange(w), rnd.randrange(h)
+        r = rnd.choice((1, 1, 1, 2))
+        c = 90 + rnd.randrange(110)
+        d.ellipse([x, y, x + r, y + r], fill=(c, c, min(255, c + 25)))
+
+    title_font = _font("DejaVuSerif-Bold.ttf", 46)
+    tw = d.textlength("Карта дня", font=title_font)
+    d.text(((w - tw) / 2, 46), "Карта дня", font=title_font, fill=GOLD)
+    if date_str:
+        sub_font = _font("DejaVuSans.ttf", 22)
+        sw = d.textlength(date_str, font=sub_font)
+        d.text(((w - sw) / 2, 104), date_str, font=sub_font, fill=LABEL_COLOR)
+
+    card_w = 380
+    card = _card_face(dc.card.id, dc.is_reversed, width=card_w)
+    cx, cy = (w - card.width) // 2, 170
+    # многослойное сияние
+    for pad, alpha in ((110, 40), (70, 70), (36, 110)):
+        halo = Image.new("RGBA", (card.width + pad * 2, card.height + pad * 2), (0, 0, 0, 0))
+        ImageDraw.Draw(halo).rounded_rectangle(
+            [pad, pad, pad + card.width, pad + card.height], 22, fill=(*GOLD, alpha)
+        )
+        halo = halo.filter(ImageFilter.GaussianBlur(pad // 2))
+        img.paste(halo, (cx - pad, cy - pad), halo)
+    img.paste(card, (cx, cy), card)
+
+    name_font = _font("DejaVuSerif-Bold.ttf", 36)
+    nw = d.textlength(dc.card.name, font=name_font)
+    ny = cy + card.height + 44
+    d.text(((w - nw) / 2, ny), dc.card.name, font=name_font, fill=GOLD)
+    tag = "перевёрнутое положение" if dc.is_reversed else "прямое положение"
+    tag_font = _font("DejaVuSans.ttf", 22)
+    tw2 = d.textlength(tag, font=tag_font)
+    d.text(((w - tw2) / 2, ny + 52), tag, font=tag_font, fill=LABEL_COLOR)
+    return img
