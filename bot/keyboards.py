@@ -28,7 +28,7 @@ def _share_button(query: str) -> InlineKeyboardButton:
 
 def spreads_catalog() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"{s.emoji} {s.title} · {s.price} ⭐", callback_data=f"spread:{s.key}")]
+        [InlineKeyboardButton(text=f"{s.emoji} {s.title} · {s.price} ✦", callback_data=f"spread:{s.key}")]
         for s in SPREADS.values()
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -56,7 +56,7 @@ def clarify_kb(reading_id: int, free_left: int, price: int) -> InlineKeyboardMar
     if free_left > 0:
         text = f"🔍 Уточнить · бесплатно (осталось {free_left})"
     else:
-        text = f"🔍 Уточнить · {price} ⭐"
+        text = f"🔍 Уточнить · {price} ✦"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=text, callback_data=f"clarify:{reading_id}")],
         [InlineKeyboardButton(text="🔮 Новый расклад", callback_data="menu:spreads")],

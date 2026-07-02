@@ -35,7 +35,7 @@ class ClarifyFlow(StatesGroup):
 # --- каталог ---
 
 
-PROMO_CACHE_KEY = "catalog_promo:v3"
+PROMO_CACHE_KEY = "catalog_promo:v4"
 
 
 @router.message(Command("spreads"))

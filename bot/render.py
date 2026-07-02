@@ -23,10 +23,11 @@ FPS = 24
 MAX_MEDIA_RATIO = 1.13
 RITUAL_SECONDS = 20  # общая длина гифки ритуала
 
-BG_TOP = (16, 14, 38)
-BG_BOTTOM = (36, 24, 62)
-GOLD = (212, 181, 112)
-LABEL_COLOR = (196, 190, 222)
+BG_TOP = (13, 12, 24)
+BG_BOTTOM = (31, 25, 48)
+GOLD = (201, 170, 108)
+GOLD_DIM = (128, 110, 78)
+LABEL_COLOR = (152, 148, 176)
 
 
 @lru_cache(maxsize=4)
@@ -59,6 +60,66 @@ def _card_back(width: int = CW) -> Image.Image:
     return _rounded(img)
 
 
+@lru_cache(maxsize=8)
+def _vignette_mask(w: int, h: int) -> Image.Image:
+    small = Image.new("L", (64, 64), 0)
+    px = small.load()
+    for y in range(64):
+        for x in range(64):
+            dx, dy = (x - 31.5) / 32, (y - 31.5) / 32
+            d = (dx * dx + dy * dy) ** 0.5
+            px[x, y] = min(110, max(0, round((d - 0.62) / 0.55 * 110)))
+    return small.resize((w, h), Image.BILINEAR)
+
+
+def premium_bg(w: int, h: int, seed: str = "arcana", stars: int | None = None) -> Image.Image:
+    """Фирменный фон: чернильный градиент, редкие звёзды с тонкими искрами,
+    виньетка и волосяная золотая рамка с уголками."""
+    import random
+
+    img = Image.new("RGB", (w, h), BG_TOP)
+    d = ImageDraw.Draw(img)
+    for y in range(h):
+        t = y / h
+        d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
+
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    rnd = random.Random(seed)
+    n_dots = stars if stars is not None else w * h // 26000
+    for _ in range(n_dots):
+        x, y = rnd.randrange(w), rnd.randrange(h)
+        c = 110 + rnd.randrange(70)
+        od.point((x, y), fill=(c, c, min(255, c + 14), 255))
+    for _ in range(max(3, n_dots // 7)):  # тонкие четырёхлучевые искры
+        x, y = rnd.randrange(w), rnd.randrange(h)
+        r = rnd.choice((5, 7, 9))
+        a = 70 + rnd.randrange(60)
+        od.line([(x - r, y), (x + r, y)], fill=(*GOLD, a), width=1)
+        od.line([(x, y - r), (x, y + r)], fill=(*GOLD, a), width=1)
+    img.paste(overlay, (0, 0), overlay)
+
+    img.paste((0, 0, 0), (0, 0), _vignette_mask(w, h))
+
+    d = ImageDraw.Draw(img)
+    inset = 16
+    d.rounded_rectangle([inset, inset, w - inset - 1, h - inset - 1], 10, outline=GOLD_DIM, width=1)
+    for cx, cy in ((inset, inset), (w - inset - 1, inset), (inset, h - inset - 1), (w - inset - 1, h - inset - 1)):
+        d.polygon([(cx, cy - 5), (cx + 5, cy), (cx, cy + 5), (cx - 5, cy)], fill=GOLD)
+    return img
+
+
+def _tracked(d: ImageDraw.ImageDraw, center_x: float, y: int, text: str,
+             font: ImageFont.FreeTypeFont, fill, tracking: int = 2) -> None:
+    """Текст с разрядкой букв (letter-spacing) по центру."""
+    widths = [d.textlength(ch, font=font) for ch in text]
+    total = sum(widths) + tracking * (len(text) - 1)
+    x = center_x - total / 2
+    for ch, cw in zip(text, widths):
+        d.text((x, y), ch, font=font, fill=fill)
+        x += cw + tracking
+
+
 def _slot_px(spread: Spread) -> tuple[list[tuple[int, int]], int, int]:
     """Пиксельные top-left координаты слотов и размер канвы (чётные стороны для h264)."""
     xs = [s.x for s in spread.slots]
@@ -81,28 +142,13 @@ def _slot_px(spread: Spread) -> tuple[list[tuple[int, int]], int, int]:
 
 def _base(spread: Spread, subtitle: str = "") -> tuple[Image.Image, list[tuple[int, int]]]:
     pos, w, h = _slot_px(spread)
-    img = Image.new("RGB", (w, h), BG_TOP)
+    img = premium_bg(w, h, seed=spread.key)
     d = ImageDraw.Draw(img)
-    for y in range(h):  # вертикальный градиент
-        t = y / h
-        d.line(
-            [(0, y), (w, y)],
-            fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)),
-        )
-    # мерцающие точки-звёзды
-    import random
-
-    rnd = random.Random(7)
-    for _ in range(w * h // 9000):
-        x, y = rnd.randrange(w), rnd.randrange(h)
-        d.point((x, y), fill=(90 + rnd.randrange(60),) * 3)
-
-    label_font = _font("DejaVuSans.ttf", 17)
+    label_font = _font("DejaVuSans.ttf", 14)
     for slot, (x, y) in zip(spread.slots, pos):
         if slot.cross:
             continue  # подпись поперечной карты наложилась бы на первую
-        lw = d.textlength(slot.label, font=label_font)
-        d.text((x + (CW - lw) / 2, y + CH + 10), slot.label, font=label_font, fill=LABEL_COLOR)
+        _tracked(d, x + CW / 2, y + CH + 12, slot.label.upper(), label_font, LABEL_COLOR, tracking=2)
     return img, pos
 
 
@@ -294,24 +340,24 @@ def _daily_scene(dc: DrawnCard, date_str: str):
     import random
 
     w, h = DAILY_W, DAILY_H
-    base = Image.new("RGB", (w, h), BG_TOP)
+    base = premium_bg(w, h, seed=dc.card.id, stars=24)
     d = ImageDraw.Draw(base)
-    for y in range(h):
-        t = y / h
-        d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
 
     card_w = 350
     card = _card_face(dc.card.id, dc.is_reversed, width=card_w)
-    cx, cy = (w - card.width) // 2, 50
+    cx, cy = (w - card.width) // 2, 48
 
-    name_font = _font("DejaVuSerif-Bold.ttf", 32)
+    name_font = _font("DejaVuSerif-Bold.ttf", 33)
     nw = d.textlength(dc.card.name, font=name_font)
-    ny = cy + card.height + 40
+    ny = cy + card.height + 34
     d.text(((w - nw) / 2, ny), dc.card.name, font=name_font, fill=GOLD)
-    tag = "перевёрнутое положение" if dc.is_reversed else "прямое положение"
-    tag_font = _font("DejaVuSans.ttf", 20)
-    tw2 = d.textlength(tag, font=tag_font)
-    d.text(((w - tw2) / 2, ny + 46), tag, font=tag_font, fill=LABEL_COLOR)
+    # тонкий орнамент-разделитель: линия — ромб — линия
+    oy = ny + 52
+    d.line([(w / 2 - 70, oy), (w / 2 - 14, oy)], fill=GOLD_DIM, width=1)
+    d.line([(w / 2 + 14, oy), (w / 2 + 70, oy)], fill=GOLD_DIM, width=1)
+    d.polygon([(w / 2, oy - 4), (w / 2 + 4, oy), (w / 2, oy + 4), (w / 2 - 4, oy)], fill=GOLD)
+    tag = "ПЕРЕВЁРНУТОЕ ПОЛОЖЕНИЕ" if dc.is_reversed else "ПРЯМОЕ ПОЛОЖЕНИЕ"
+    _tracked(d, w / 2, oy + 14, tag, _font("DejaVuSans.ttf", 14), LABEL_COLOR, tracking=3)
 
     # два состояния ореола — между ними дышим блендом
     halos = []
@@ -326,8 +372,8 @@ def _daily_scene(dc: DrawnCard, date_str: str):
     # мерцающие звёзды: позиция, радиус, фаза
     rnd = random.Random(dc.card.id)
     stars = [
-        (rnd.randrange(w), rnd.randrange(h), rnd.choice((1, 1, 2)), rnd.random() * math.tau)
-        for _ in range(120)
+        (rnd.randrange(34, w - 34), rnd.randrange(34, h - 34), rnd.choice((1, 1, 2)), rnd.random() * math.tau)
+        for _ in range(80)
     ]
 
     # блик: диагональная светлая полоса, пробегает по карте раз за цикл
@@ -354,8 +400,8 @@ def iter_daily_frames(dc: DrawnCard, date_str: str = ""):
         d = ImageDraw.Draw(frame)
         for sx, sy, r, phase in stars:
             k = 0.5 + 0.5 * math.sin(math.tau * t + phase)
-            c = round(70 + 150 * k)
-            d.ellipse([sx, sy, sx + r, sy + r], fill=(c, c, min(255, c + 20)))
+            c = round(60 + 120 * k)
+            d.ellipse([sx, sy, sx + r, sy + r], fill=(c, c, min(255, c + 16)))
 
         float_y = round(10 * math.sin(math.tau * t))
         tilt = 2.0 * math.sin(math.tau * t + math.pi / 2)
@@ -381,32 +427,13 @@ def iter_daily_frames(dc: DrawnCard, date_str: str = ""):
 
 def render_daily_card(dc: DrawnCard, date_str: str = "") -> Image.Image:
     """Статичная открытка «Карта дня»: крупная карта в золотом сиянии."""
-    w, h = 720, 1120
-    img = Image.new("RGB", (w, h), BG_TOP)
+    w, h = DAILY_W, DAILY_H
+    img = premium_bg(w, h, seed=dc.card.id, stars=24)
     d = ImageDraw.Draw(img)
-    for y in range(h):
-        t = y / h
-        d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
-    import random
 
-    rnd = random.Random(dc.card.id)  # свой рисунок звёзд у каждой карты
-    for _ in range(140):
-        x, y = rnd.randrange(w), rnd.randrange(h)
-        r = rnd.choice((1, 1, 1, 2))
-        c = 90 + rnd.randrange(110)
-        d.ellipse([x, y, x + r, y + r], fill=(c, c, min(255, c + 25)))
-
-    title_font = _font("DejaVuSerif-Bold.ttf", 46)
-    tw = d.textlength("Карта дня", font=title_font)
-    d.text(((w - tw) / 2, 46), "Карта дня", font=title_font, fill=GOLD)
-    if date_str:
-        sub_font = _font("DejaVuSans.ttf", 22)
-        sw = d.textlength(date_str, font=sub_font)
-        d.text(((w - sw) / 2, 104), date_str, font=sub_font, fill=LABEL_COLOR)
-
-    card_w = 380
+    card_w = 350
     card = _card_face(dc.card.id, dc.is_reversed, width=card_w)
-    cx, cy = (w - card.width) // 2, 170
+    cx, cy = (w - card.width) // 2, 48
     # многослойное сияние
     for pad, alpha in ((110, 40), (70, 70), (36, 110)):
         halo = Image.new("RGBA", (card.width + pad * 2, card.height + pad * 2), (0, 0, 0, 0))
@@ -417,12 +444,10 @@ def render_daily_card(dc: DrawnCard, date_str: str = "") -> Image.Image:
         img.paste(halo, (cx - pad, cy - pad), halo)
     img.paste(card, (cx, cy), card)
 
-    name_font = _font("DejaVuSerif-Bold.ttf", 36)
+    name_font = _font("DejaVuSerif-Bold.ttf", 33)
     nw = d.textlength(dc.card.name, font=name_font)
-    ny = cy + card.height + 44
+    ny = cy + card.height + 34
     d.text(((w - nw) / 2, ny), dc.card.name, font=name_font, fill=GOLD)
-    tag = "перевёрнутое положение" if dc.is_reversed else "прямое положение"
-    tag_font = _font("DejaVuSans.ttf", 22)
-    tw2 = d.textlength(tag, font=tag_font)
-    d.text(((w - tw2) / 2, ny + 52), tag, font=tag_font, fill=LABEL_COLOR)
+    tag = "ПЕРЕВЁРНУТОЕ ПОЛОЖЕНИЕ" if dc.is_reversed else "ПРЯМОЕ ПОЛОЖЕНИЕ"
+    _tracked(d, w / 2, ny + 58, tag, _font("DejaVuSans.ttf", 14), LABEL_COLOR, tracking=3)
     return img
