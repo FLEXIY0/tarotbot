@@ -8,6 +8,7 @@ import logging
 
 import anthropic
 
+from bot.analysis import analysis_for_prompt, detailed_reading
 from bot.config import config
 from bot.deck import DrawnCard
 from bot.spreads import Spread
@@ -95,9 +96,11 @@ class Interpreter:
         if history:
             prompt_parts.append("Темы прошлых обращений (для тонкой персонализации, не пересказывай их): "
                                 + "; ".join(history[:3]))
+        prompt_parts.append("Аналитика расклада по классическим техникам (вплети её выводы):\n"
+                            + analysis_for_prompt(drawn, spread))
         prompt_parts.append("Дай интерпретацию расклада.")
         text = await self._complete("\n\n".join(prompt_parts))
-        return text or self.fallback(drawn, spread, name)
+        return text or self.fallback(drawn, spread, name, question)
 
     async def interpret_daily(self, dc: DrawnCard, name: str | None) -> str:
         prompt = (
@@ -146,18 +149,10 @@ class Interpreter:
         )
 
     @staticmethod
-    def fallback(drawn: list[DrawnCard], spread: Spread, name: str | None) -> str:
-        """Интерпретация из статических значений — пользователь не остаётся без результата."""
-        who = f"{name}, " if name else ""
-        lines = [f"{who}вот что показали карты в раскладе «{spread.title}»:\n"]
-        for slot, dc in zip(spread.slots, drawn):
-            lines.append(f"**{slot.label}** — **{dc.title}**: {dc.meaning}.")
-        lines.append(
-            "\nСоедини эти образы с тем, что происходит в твоей ситуации, — карты описывают "
-            "энергии, а выбор всегда остаётся за тобой. Задай уточняющий вопрос, если что-то "
-            "хочется раскрыть глубже."
-        )
-        return "\n".join(lines)
+    def fallback(drawn: list[DrawnCard], spread: Spread, name: str | None,
+                 question: str | None = None) -> str:
+        """Детальный разбор по классическим техникам — работает без LLM."""
+        return detailed_reading(drawn, spread, question, name)
 
 
 interpreter = Interpreter()
