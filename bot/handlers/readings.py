@@ -1,7 +1,9 @@
 """Платные расклады: каталог -> вопрос -> счёт в Stars -> ритуал -> интерпретация -> уточнения."""
 
+import asyncio
 import json
 import logging
+from contextlib import suppress
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -14,7 +16,7 @@ from bot.config import config
 from bot.db import db
 from bot.deck import CARD_BY_ID, DrawnCard, draw
 from bot.llm import interpreter
-from bot.ritual import send_reading_media
+from bot.ritual import reading_caption, send_reading_media
 from bot.spreads import SPREADS
 from bot.textutil import md_bold_to_html
 
@@ -171,22 +173,75 @@ async def deliver_reading(
     )
 
     prefix = "🎴 Оплата получена. " if charge_id else "🎴 Админ-режим, без оплаты. "
-    await message.answer(prefix + "Тасую колоду и раскладываю карты…")
+    status = await message.answer(prefix + "Тасую колоду и раскладываю карты…")
+
+    # толкование пишется в фоне, пока пользователь смотрит анимацию
+    task = asyncio.create_task(_generate_interpretation(reading_id, drawn, spread, question, user))
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
     subtitle = f"Вопрос: {question[:60]}…" if question and len(question) > 60 else (f"Вопрос: {question}" if question else "")
+    caption = reading_caption(drawn, spread, question)
     try:
-        await send_reading_media(message.bot, message.chat.id, drawn, spread, subtitle)
+        await send_reading_media(
+            message.bot, message.chat.id, drawn, spread, subtitle,
+            caption=caption, reply_markup=kb.reveal_kb(reading_id),
+        )
     except Exception:
         log.exception("Медиа расклада %d не отправилось", reading_id)
+    with suppress(Exception):
+        await status.delete()
 
-    history = [r["question"] for r in await db.recent_readings(user["id"], 4, paid_only=True)
-               if r["question"] and r["id"] != reading_id]
-    text = await interpreter.interpret(
-        drawn, spread, question, user.get("name"), user.get("birth_date"), history
-    )
-    await db.set_interpretation(reading_id, text)
-    await message.answer(
+
+_bg_tasks: set[asyncio.Task] = set()
+
+
+async def _generate_interpretation(
+    reading_id: int, drawn: list[DrawnCard], spread, question: str | None, user: dict
+) -> None:
+    try:
+        history = [r["question"] for r in await db.recent_readings(user["id"], 4, paid_only=True)
+                   if r["question"] and r["id"] != reading_id]
+        text = await interpreter.interpret(
+            drawn, spread, question, user.get("name"), user.get("birth_date"), history
+        )
+        await db.set_interpretation(reading_id, text)
+    except Exception:
+        log.exception("Фоновая интерпретация расклада %d не удалась", reading_id)
+
+
+@router.callback_query(F.data.startswith("reveal:"))
+async def reveal_interpretation(callback: CallbackQuery) -> None:
+    assert callback.data and callback.from_user and isinstance(callback.message, Message)
+    reading_id = int(callback.data.split(":", 1)[1])
+    reading = await db.get_reading(reading_id)
+    user = await db.get_or_create_user(callback.from_user.id)
+    if not reading or reading["user_id"] != user["id"]:
+        await callback.answer("Расклад не найден", show_alert=True)
+        return
+    await callback.answer("✨ Читаю карты…")
+    with suppress(Exception):
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+    # ждём фоновую генерацию; если её нет (например, после рестарта) — делаем сами
+    text = reading["interpretation"]
+    for _ in range(12):
+        if text:
+            break
+        await asyncio.sleep(2)
+        reading = await db.get_reading(reading_id)
+        text = reading["interpretation"] if reading else None
+    if not text:
+        spread = SPREADS[reading["type"]]
+        drawn = [DrawnCard(CARD_BY_ID[c["id"]], c["reversed"]) for c in json.loads(reading["cards_json"])]
+        text = await interpreter.interpret(
+            drawn, spread, reading["question"], user.get("name"), user.get("birth_date"), None
+        )
+        await db.set_interpretation(reading_id, text)
+
+    await callback.message.answer(
         md_bold_to_html(text),
-        reply_markup=kb.clarify_kb(reading_id, config.free_clarifications, config.price_clarify),
+        reply_markup=kb.clarify_kb(reading_id, reading["clarifications_left"], config.price_clarify),
     )
 
 

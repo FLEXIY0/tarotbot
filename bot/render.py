@@ -263,8 +263,23 @@ def iter_frames(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> I
         draw_landed(canvas)
         yield from repeat(canvas, hold_after)
 
-    # долгая финальная пауза, чтобы зацикленный повтор не мельтешил
-    yield from repeat(render_collage(drawn, spread, subtitle), FPS * 4)
+    # долгая финальная пауза + плавное затухание на стыке цикла
+    final = render_collage(drawn, spread, subtitle)
+    yield from repeat(final, FPS * 5)
+    fade_frames = 10
+    dark = Image.new("RGB", final.size, BG_TOP)
+    for step in range(1, fade_frames + 1):
+        yield Image.blend(final, dark, _smoothstep(step / fade_frames))
+
+
+def with_fade_in(frames: Iterator[Image.Image], fade_frames: int = 8) -> Iterator[Image.Image]:
+    """Плавное проявление первых кадров — цикл гифки замыкается мягко."""
+    first = next(frames)
+    dark = Image.new("RGB", first.size, BG_TOP)
+    for step in range(fade_frames):
+        yield Image.blend(dark, first, _smoothstep((step + 1) / fade_frames))
+    yield first
+    yield from frames
 
 
 def render_daily_card(dc: DrawnCard, date_str: str = "") -> Image.Image:

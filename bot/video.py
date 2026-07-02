@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from bot.deck import DrawnCard
-from bot.render import FPS, iter_frames, render_collage
+from bot.render import FPS, iter_frames, render_collage, with_fade_in
 from bot.spreads import Spread
 
 log = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def ffmpeg_exe() -> str:
 
 def render_reading_video(drawn: list[DrawnCard], spread: Spread, subtitle: str = "") -> Path | None:
     """Возвращает путь к mp4 или None при сбое (тогда шлём статичный коллаж)."""
-    frames = iter_frames(drawn, spread, subtitle)
+    frames = with_fade_in(iter_frames(drawn, spread, subtitle))
     first = next(frames)
     w, h = first.size
     out = Path(tempfile.mkstemp(suffix=".mp4", prefix="tarot_")[1])

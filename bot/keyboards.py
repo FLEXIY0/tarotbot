@@ -39,6 +39,12 @@ def skip_question() -> InlineKeyboardMarkup:
     ])
 
 
+def reveal_kb(reading_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔮 Раскрыть толкование", callback_data=f"reveal:{reading_id}")]
+    ])
+
+
 def clarify_kb(reading_id: int, free_left: int, price: int) -> InlineKeyboardMarkup:
     if free_left > 0:
         text = f"🔍 Уточнить бесплатно (осталось {free_left})"
