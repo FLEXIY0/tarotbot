@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from bot.deck import DrawnCard
 from bot.spreads import Spread
@@ -287,6 +287,108 @@ def with_fade_in(frames: Iterator[Image.Image], fade_frames: int = 8) -> Iterato
         yield Image.blend(dark, first, _smoothstep((step + 1) / fade_frames))
     yield first
     yield from frames
+
+
+DAILY_W, DAILY_H = 720, 900          # пропорция 4:5 — не режется в пузыре Telegram
+DAILY_FRAMES = 132                   # 5.5 c бесшовного цикла
+
+
+def _daily_scene(dc: DrawnCard, date_str: str):
+    """База «живой» карты дня: фон, тексты, спрайты для анимации."""
+    import random
+
+    w, h = DAILY_W, DAILY_H
+    base = Image.new("RGB", (w, h), BG_TOP)
+    d = ImageDraw.Draw(base)
+    for y in range(h):
+        t = y / h
+        d.line([(0, y), (w, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOTTOM)))
+
+    title_font = _font("DejaVuSerif-Bold.ttf", 40)
+    tw = d.textlength("Карта дня", font=title_font)
+    d.text(((w - tw) / 2, 34), "Карта дня", font=title_font, fill=GOLD)
+    if date_str:
+        sub_font = _font("DejaVuSans.ttf", 20)
+        sw = d.textlength(date_str, font=sub_font)
+        d.text(((w - sw) / 2, 86), date_str, font=sub_font, fill=LABEL_COLOR)
+
+    card_w = 330
+    card = _card_face(dc.card.id, dc.is_reversed, width=card_w)
+    cx, cy = (w - card.width) // 2, 146
+
+    name_font = _font("DejaVuSerif-Bold.ttf", 32)
+    nw = d.textlength(dc.card.name, font=name_font)
+    ny = cy + card.height + 40
+    d.text(((w - nw) / 2, ny), dc.card.name, font=name_font, fill=GOLD)
+    tag = "перевёрнутое положение" if dc.is_reversed else "прямое положение"
+    tag_font = _font("DejaVuSans.ttf", 20)
+    tw2 = d.textlength(tag, font=tag_font)
+    d.text(((w - tw2) / 2, ny + 46), tag, font=tag_font, fill=LABEL_COLOR)
+
+    # два состояния ореола — между ними дышим блендом
+    halos = []
+    for alpha in (34, 88):
+        pad = 84
+        halo = Image.new("RGBA", (card.width + pad * 2, card.height + pad * 2), (0, 0, 0, 0))
+        ImageDraw.Draw(halo).rounded_rectangle(
+            [pad, pad, pad + card.width, pad + card.height], 20, fill=(*GOLD, alpha)
+        )
+        halos.append(halo.filter(ImageFilter.GaussianBlur(38)))
+
+    # мерцающие звёзды: позиция, радиус, фаза
+    rnd = random.Random(dc.card.id)
+    stars = [
+        (rnd.randrange(w), rnd.randrange(h), rnd.choice((1, 1, 2)), rnd.random() * math.tau)
+        for _ in range(120)
+    ]
+
+    # блик: диагональная светлая полоса, пробегает по карте раз за цикл
+    bw = 150
+    band = Image.new("RGBA", (bw, card.height * 2), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(band)
+    for x in range(bw):
+        a = round(70 * (1 - abs(x - bw / 2) / (bw / 2)))
+        bd.line([(x, 0), (x, band.height)], fill=(255, 250, 235, a))
+    band = band.rotate(24, expand=True, resample=Image.BILINEAR)
+
+    return base, card, (cx, cy), halos, stars, band
+
+
+def iter_daily_frames(dc: DrawnCard, date_str: str = ""):
+    """Бесшовный цикл: карта парит и чуть покачивается, ореол дышит,
+    звёзды мерцают, по карте пробегает блик. Без переворотов."""
+    base, card, (cx, cy), (halo_lo, halo_hi), stars, band = _daily_scene(dc, date_str)
+    pad = (halo_lo.width - card.width) // 2
+    n = DAILY_FRAMES
+    for f in range(n):
+        t = f / n  # все движения — целые гармоники, стык цикла бесшовный
+        frame = base.copy()
+        d = ImageDraw.Draw(frame)
+        for sx, sy, r, phase in stars:
+            k = 0.5 + 0.5 * math.sin(math.tau * t + phase)
+            c = round(70 + 150 * k)
+            d.ellipse([sx, sy, sx + r, sy + r], fill=(c, c, min(255, c + 20)))
+
+        float_y = round(10 * math.sin(math.tau * t))
+        tilt = 2.0 * math.sin(math.tau * t + math.pi / 2)
+
+        halo = Image.blend(halo_lo, halo_hi, 0.5 + 0.5 * math.sin(math.tau * t + math.pi / 3))
+        frame.paste(halo, (cx - pad, cy - pad + float_y), halo)
+
+        sprite = card.copy()
+        sweep_x = round(-band.width + (card.width + 2 * band.width) * t)
+        gloss = Image.new("RGBA", sprite.size, (0, 0, 0, 0))
+        gloss.paste(band, (sweep_x, -(band.height - sprite.height) // 2), band)
+        gloss.putalpha(ImageChops.multiply(gloss.getchannel("A"), sprite.getchannel("A")))
+        sprite.alpha_composite(gloss)
+        if abs(tilt) > 0.05:
+            sprite = sprite.rotate(tilt, expand=True, resample=Image.BILINEAR)
+        frame.paste(
+            sprite,
+            (cx - (sprite.width - card.width) // 2, cy + float_y - (sprite.height - card.height) // 2),
+            sprite,
+        )
+        yield frame
 
 
 def render_daily_card(dc: DrawnCard, date_str: str = "") -> Image.Image:

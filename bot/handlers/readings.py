@@ -174,7 +174,7 @@ async def on_payment(message: Message, state: FSMContext) -> None:
         reading_id = int(payload.split(":", 1)[1])
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=False)
-        await message.answer("Оплата получена. Напиши свой уточняющий вопрос одним сообщением.")
+        await message.answer("🔍 Оплата получена. Напиши свой уточняющий вопрос одним сообщением.")
 
 
 async def deliver_reading(
@@ -199,7 +199,7 @@ async def deliver_reading(
         clarifications_left=config.free_clarifications,
     )
 
-    prefix = "Оплата получена. " if charge_id else "Админ-режим, без оплаты. "
+    prefix = "🎴 Оплата получена. " if charge_id else "🎴 Админ-режим, без оплаты. "
     status = await message.answer(prefix + "Тасую колоду и раскладываю карты…")
 
     # толкование пишется в фоне, пока пользователь смотрит анимацию
@@ -267,7 +267,7 @@ async def _do_reveal(callback: CallbackQuery, reading_id: int) -> None:
     if not reading or reading["user_id"] != user["id"]:
         await callback.answer("Расклад не найден", show_alert=True)
         return
-    await callback.answer("Читаю карты…")
+    await callback.answer("✨ Читаю карты…")
     with suppress(Exception):
         await callback.message.edit_reply_markup(reply_markup=kb.shared_reading_kb(reading_id))
 
@@ -309,11 +309,11 @@ async def clarify_start(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.from_user.id in config.admin_ids:  # админам бесплатно, лимит не тратится
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=False)
-        await callback.message.answer("Напиши уточняющий вопрос (админ-режим, бесплатно).")
+        await callback.message.answer("🔍 Напиши уточняющий вопрос (админ-режим, бесплатно).")
     elif reading["clarifications_left"] > 0:
         await state.set_state(ClarifyFlow.question)
         await state.update_data(reading_id=reading_id, free=True)
-        await callback.message.answer("Напиши уточняющий вопрос к этому раскладу одним сообщением.")
+        await callback.message.answer("🔍 Напиши уточняющий вопрос к этому раскладу одним сообщением.")
     else:
         await callback.message.answer_invoice(
             title="Уточняющий вопрос",
@@ -341,7 +341,7 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
     ]
     prior = await db.get_clarifications(reading["id"])
     question = message.text.strip()[:500]
-    await message.answer("Вглядываюсь в карты…")
+    await message.answer("🔮 Вглядываюсь в карты…")
     answer = await interpreter.clarify(
         drawn, spread, reading["question"], reading["interpretation"] or "",
         prior, question, user.get("name"),

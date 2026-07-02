@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from bot.deck import DrawnCard
-from bot.render import FPS, iter_frames, render_collage, with_fade_in
+from bot.render import FPS, iter_daily_frames, iter_frames, render_collage, with_fade_in
 from bot.spreads import Spread
 
 log = logging.getLogger(__name__)
@@ -49,6 +49,34 @@ def render_reading_video(drawn: list[DrawnCard], spread: Spread, subtitle: str =
         return out
     except Exception:
         log.exception("Не удалось собрать видео расклада (%s)", spread.key)
+        out.unlink(missing_ok=True)
+        return None
+
+
+def render_daily_video(drawn_card, date_str: str = "") -> Path | None:
+    """Живая карта дня: бесшовный луп без переворотов."""
+    frames = iter_daily_frames(drawn_card, date_str)
+    first = next(frames)
+    w, h = first.size
+    out = Path(tempfile.mkstemp(suffix=".mp4", prefix="daily_")[1])
+    cmd = [
+        ffmpeg_exe(), "-y", "-loglevel", "error",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "25",
+        "-movflags", "+faststart", str(out),
+    ]
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert proc.stdin is not None
+        proc.stdin.write(first.tobytes())
+        for f in frames:
+            proc.stdin.write(f.tobytes())
+        proc.stdin.close()
+        if proc.wait(timeout=120) != 0:
+            raise RuntimeError(f"ffmpeg exit {proc.returncode}")
+        return out
+    except Exception:
+        log.exception("Не удалось собрать видео карты дня")
         out.unlink(missing_ok=True)
         return None
 

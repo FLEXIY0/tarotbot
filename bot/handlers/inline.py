@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 def _invite_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Сделать свой расклад", url=f"https://t.me/{runtime.bot_username}")
+        InlineKeyboardButton(text="🔮 Сделать свой расклад", url=f"https://t.me/{runtime.bot_username}")
     ]])
 
 
@@ -84,17 +84,20 @@ async def share_reading(q: InlineQuery) -> None:
         # карта дня: d:<card_id>:<u|r>
         parts = query.split(":")
         if len(parts) == 3 and parts[1] in CARD_BY_ID:
-            file_id = await db.cache_get(f"dailyimg:{parts[1]}:{parts[2]}")
-            if file_id:
-                card = CARD_BY_ID[parts[1]]
-                rev = " (перевёрнутая)" if parts[2] == "r" else ""
-                results.append(InlineQueryResultCachedPhoto(
-                    id=query.replace(":", "_"),
-                    photo_file_id=file_id,
-                    caption=f"Моя карта дня — <b>{card.name}</b>{rev}",
-                    parse_mode="HTML",
-                    reply_markup=_invite_kb(),
-                ))
+            card = CARD_BY_ID[parts[1]]
+            rev = " (перевёрнутая)" if parts[2] == "r" else ""
+            common = dict(
+                id=query.replace(":", "_"),
+                caption=f"Моя карта дня — <b>{card.name}</b>{rev}",
+                parse_mode="HTML",
+                reply_markup=_invite_kb(),
+            )
+            anim_id = await db.cache_get(f"dailyanim:{parts[1]}:{parts[2]}")
+            photo_id = await db.cache_get(f"dailyimg:{parts[1]}:{parts[2]}")
+            if anim_id:
+                results.append(InlineQueryResultCachedMpeg4Gif(mpeg4_file_id=anim_id, **common))
+            elif photo_id:
+                results.append(InlineQueryResultCachedPhoto(photo_file_id=photo_id, **common))
 
     results.append(_invite_article())
     await q.answer(results, cache_time=10, is_personal=True)

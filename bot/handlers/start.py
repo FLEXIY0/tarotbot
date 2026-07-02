@@ -41,11 +41,11 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
     user = await db.get_or_create_user(message.from_user.id, referrer)
     if user.get("name"):
         await message.answer(
-            f"С возвращением, {user['name']}. Карты уже ждут.", reply_markup=kb.main_menu
+            f"🌙 С возвращением, {user['name']}. Карты уже ждут.", reply_markup=kb.main_menu
         )
         return
     await message.answer(
-        "Приветствую. Я — Люмина, твой проводник в мир Таро.\n\n"
+        "🌙 Приветствую! Я — Люмина, твой проводник в мир Таро.\n\n"
         "Я делаю персональные расклады: ты задаёшь вопрос, я тяну карты из "
         "колоды Райдера–Уэйта и читаю их для тебя.\n\n"
         "Чтобы расклады были точнее, давай познакомимся. <b>Как тебя зовут?</b>\n\n<i>" + DISCLAIMER + "</i>",
@@ -96,7 +96,7 @@ async def onb_skip_birth(callback: CallbackQuery, state: FSMContext) -> None:
 async def finish_onboarding(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
-        "Готово. Начни с бесплатной <b>карты дня</b> — она уже ждёт тебя.",
+        "✨ Готово. Начни с бесплатной <b>карты дня</b> — она уже ждёт тебя.",
         reply_markup=kb.main_menu,
     )
 

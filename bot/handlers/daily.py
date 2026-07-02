@@ -15,6 +15,7 @@ from bot.db import db
 from bot.deck import draw
 from bot.llm import interpreter
 from bot.render import render_daily_card
+from bot.video import render_daily_video
 from bot.textutil import md_bold_to_html
 
 router = Router(name="daily")
@@ -44,7 +45,7 @@ async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
     if user.get("daily_card_date") == today:
         await bot.send_message(
             chat_id,
-            "Карту дня ты уже получил(а) сегодня — новая появится после полуночи.\n"
+            "🌙 Карту дня ты уже получил(а) сегодня — новая появится после полуночи.\n"
             "А пока можно разобрать конкретный вопрос в «Раскладах».",
             reply_markup=kb.daily_upsell(remind_on),
         )
@@ -53,14 +54,14 @@ async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
     await db.update_user(tg_id, daily_card_date=today)
     dc = draw(1)[0]
     orientation = "r" if dc.is_reversed else "u"
-    status = await bot.send_message(chat_id, "Тасую колоду и тяну твою карту дня…")
+    status = await bot.send_message(chat_id, "🎴 Тасую колоду и тяну твою карту дня…")
     date_str = datetime.now(ZoneInfo(config.tz)).strftime("%d.%m.%Y")
-    cache_key = f"dailyimg:{dc.card.id}:{orientation}"
+    anim_key = f"dailyanim:{dc.card.id}:{orientation}"
 
-    # картинка и текст готовятся параллельно, уходят одним сообщением
+    # «живая» карта и текст готовятся параллельно, уходят одним сообщением
     text, cached = await asyncio.gather(
         interpreter.interpret_daily(dc, user.get("name")),
-        db.cache_get(cache_key),
+        db.cache_get(anim_key),
     )
     caption = md_bold_to_html(text)
     markup = kb.daily_upsell(remind_on, share_query=f"d:{dc.card.id}:{orientation}")
@@ -68,8 +69,22 @@ async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
     sent = None
     if cached:
         with suppress(Exception):
-            sent = await bot.send_photo(chat_id, cached, caption=caption, reply_markup=markup)
+            sent = await bot.send_animation(chat_id, cached, caption=caption, reply_markup=markup)
     if sent is None:
+        video = await asyncio.to_thread(render_daily_video, dc, date_str)
+        if video is not None:
+            try:
+                sent = await bot.send_animation(
+                    chat_id, FSInputFile(video), caption=caption, reply_markup=markup
+                )
+                media = sent.animation or sent.video or sent.document
+                if media:
+                    await db.cache_set(anim_key, media.file_id)
+            except Exception:
+                sent = None
+            finally:
+                video.unlink(missing_ok=True)
+    if sent is None:  # fallback: статичная открытка
         img = await asyncio.to_thread(render_daily_card, dc, date_str)
         path = Path(tempfile.mkstemp(suffix=".jpg", prefix="daily_")[1])
         try:
@@ -78,7 +93,7 @@ async def _send_daily(bot: Bot, chat_id: int, tg_id: int) -> None:
         finally:
             path.unlink(missing_ok=True)
         if sent.photo:
-            await db.cache_set(cache_key, sent.photo[-1].file_id)
+            await db.cache_set(f"dailyimg:{dc.card.id}:{orientation}", sent.photo[-1].file_id)
     with suppress(Exception):
         await status.delete()
 
@@ -126,7 +141,7 @@ async def reminder_loop(bot: Bot) -> None:
                 with suppress(Exception):
                     await bot.send_message(
                         tg_id,
-                        "Доброе утро! Твоя карта дня уже ждёт в колоде.",
+                        "🌙 Доброе утро! Твоя карта дня уже ждёт в колоде.",
                         reply_markup=kb.reminder_kb(),
                     )
                 await asyncio.sleep(0.1)
